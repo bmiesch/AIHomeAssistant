@@ -18,8 +18,8 @@ ifeq ($(MACOS), Darwin)
     CXXFLAGS += -D__APPLE__
 else
     # For Raspberry Pi or Linux, link against the BlueZ Bluetooth library
-    LDFLAGS = -lbluetooth -luuid
-    CXXFLAGS += -I/usr/include/bluetooth -I/usr/include/uuid
+    LDFLAGS = -lbluetooth
+    CXXFLAGS += -I/usr/include/bluetooth
 endif
 
 # The default rule
