@@ -24,7 +24,7 @@ int connectToDevice(const std::string& address, const std::string& uuid) {
     bdaddr_t target;
     str2ba(address.c_str(), &target);
     
-    sdp_session_t* session = sdp_connect(BDADDR_ANY, &target, SDP_RETRY_IF_BUSY);
+    sdp_session_t* session = sdp_connect(NULL, &target, SDP_RETRY_IF_BUSY);
     if (!session) {
         std::cerr << "Failed to connect to SDP server" << std::endl;
         return -1;
