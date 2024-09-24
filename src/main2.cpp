@@ -1,12 +1,14 @@
 #include <iostream>
 #include <string>
 #include <cstring>
+#include <vector>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/rfcomm.h>
 #include <bluetooth/sdp.h>
 #include <bluetooth/sdp_lib.h>
+#include <uuid/uuid.h>
 
 // Function to connect to a Bluetooth device using UUID
 int connectToDevice(const std::string& address, const std::string& uuid) {
@@ -21,13 +23,42 @@ int connectToDevice(const std::string& address, const std::string& uuid) {
         return -1;
     }
 
-    // Find the RFCOMM channel for the UUID
-    channel = sdp_search_rfcomm_channel(address.c_str(), service_uuid);
+    // Perform SDP search
+    bdaddr_t target;
+    str2ba(address.c_str(), &target);
+    
+    sdp_session_t* session = sdp_connect(&target, BDADDR_LOCAL, SDP_RETRY_IF_BUSY);
+    if (!session) {
+        std::cerr << "Failed to connect to SDP server" << std::endl;
+        return -1;
+    }
+
+    sdp_list_t* search_list = sdp_list_append(NULL, &service_uuid);
+    sdp_list_t* attrid_list = sdp_list_append(NULL, sdp_uint16_create(SDP_ATTR_PROTO_DESC_LIST));
+
+    sdp_list_t* response_list = NULL;
+    if (sdp_service_search_attr_req(session, search_list, SDP_ATTR_REQ_RANGE, attrid_list, &response_list) < 0) {
+        std::cerr << "Service search failed" << std::endl;
+        sdp_close(session);
+        return -1;
+    }
+
+    sdp_list_t* proto_list = NULL;
+    if (sdp_get_proto_desc(response_list, RFCOMM_UUID, &proto_list) == 0) {
+        channel = sdp_get_proto_port(proto_list, RFCOMM_UUID);
+    }
+
+    sdp_list_free(response_list, NULL, NULL);
+    sdp_list_free(search_list, NULL, NULL);
+    sdp_list_free(attrid_list, NULL, NULL);
+    sdp_close(session);
+
     if (channel < 0) {
         std::cerr << "Service not found" << std::endl;
         return -1;
     }
 
+    // Create socket and connect
     s = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
     if (s == -1) {
         std::cerr << "Error creating socket" << std::endl;
