@@ -11,68 +11,23 @@
 
 
 // Function to connect to a Bluetooth device using UUID
-int connectToDevice(const std::string& address, const std::string& uuid) {
+int connectToDevice(const std::string& address) {
     struct sockaddr_rc addr = { 0 };
     int s, status;
-    uuid_t service_uuid;
-    int channel = -1;
 
-    // Convert string UUID to uuid_t
-    sdp_uuid128_create(&service_uuid, uuid.c_str());
-
-    // Perform SDP search
-    bdaddr_t target;
-    str2ba(address.c_str(), &target);
-    
-    sdp_session_t* session = sdp_connect(NULL, &target, SDP_RETRY_IF_BUSY);
-    if (!session) {
-        std::cerr << "Failed to connect to SDP server" << std::endl;
-        return -1;
-    }
-
-    sdp_list_t* search_list = sdp_list_append(NULL, &service_uuid);
-    uint32_t range = 0x0000ffff;
-    sdp_list_t* attrid_list = sdp_list_append(NULL, &range);
-
-    sdp_list_t* response_list = NULL;
-    if (sdp_service_search_attr_req(session, search_list, SDP_ATTR_REQ_RANGE, attrid_list, &response_list) < 0) {
-        std::cerr << "Service search failed" << std::endl;
-        sdp_close(session);
-        return -1;
-    }
-
-    for (sdp_list_t* r = response_list; r; r = r->next) {
-        sdp_record_t* rec = (sdp_record_t*)r->data;
-        sdp_list_t* proto_list;
-        if (sdp_get_access_protos(rec, &proto_list) == 0) {
-            channel = sdp_get_proto_port(proto_list, RFCOMM_UUID);
-            if (channel > 0) {
-                break;
-            }
-        }
-    }
-
-    sdp_list_free(response_list, (sdp_free_func_t)sdp_record_free);
-    sdp_list_free(search_list, NULL);
-    sdp_list_free(attrid_list, NULL);
-    sdp_close(session);
-
-    if (channel < 0) {
-        std::cerr << "Service not found" << std::endl;
-        return -1;
-    }
-
-    // Create socket and connect
+    // Allocate a socket
     s = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
     if (s == -1) {
         std::cerr << "Error creating socket" << std::endl;
         return -1;
     }
 
+    // Set the connection parameters (who to connect to)
     addr.rc_family = AF_BLUETOOTH;
-    addr.rc_channel = (uint8_t) channel;
+    addr.rc_channel = (uint8_t) 1;  // Use channel 1 by default
     str2ba(address.c_str(), &addr.rc_bdaddr);
 
+    // Connect to server
     status = connect(s, (struct sockaddr *)&addr, sizeof(addr));
     if (status == -1) {
         std::cerr << "Error connecting to device" << std::endl;
@@ -82,6 +37,7 @@ int connectToDevice(const std::string& address, const std::string& uuid) {
 
     return s;
 }
+
 
 std::vector<uint8_t> hexStringToBytes(const std::string& hex) {
     std::vector<uint8_t> bytes;
