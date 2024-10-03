@@ -5,8 +5,12 @@ CXXFLAGS = -Wall -Wextra -pedantic -std=c++17
 # The name of the output binary
 TARGET = bluetooth_light_control
 
-# The source file
-SRC = src/main.cpp
+# Source files
+SRCS = src/main.cpp src/manager.cpp src/device.cpp
+OBJS = $(SRCS:.cpp=.o)
+
+# Header files directory
+INCLUDES = -Iinc -Isrc
 
 # SimpleBLE library flags
 SIMPLEBLE_INCLUDE = -I/usr/local/include
@@ -16,19 +20,22 @@ SIMPLEBLE_LIB = -lsimpleble
 DBUS_LIB = -ldbus-1
 
 # Flags for SimpleBLE dependencies
-CXXFLAGS += $(SIMPLEBLE_INCLUDE)
+CXXFLAGS += $(SIMPLEBLE_INCLUDE) $(INCLUDES)
 LDFLAGS = -L/usr/local/lib $(SIMPLEBLE_LIB) $(DBUS_LIB) -lpthread
-
 
 # The default rule
 all: $(TARGET)
 
 # Rule to build the target binary
-$(TARGET): $(SRC)
+$(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Rule to compile source files
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Clean up build artifacts
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(OBJS)
 
 .PHONY: all clean

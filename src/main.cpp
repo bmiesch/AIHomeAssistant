@@ -1,108 +1,85 @@
+#include "manager.h"
 #include <iostream>
-#include <vector>
-#include <simpleble/SimpleBLE.h>
+#include <stdexcept>
 #include <thread>
 #include <chrono>
 
-std::string device_address = "BE:67:00:AC:C8:82";
-SimpleBLE::BluetoothUUID service_uuid =
-      SimpleBLE::BluetoothUUID("0000fff0-0000-1000-8000-00805f9b34fb");
-SimpleBLE::BluetoothUUID device_uuid =
-      SimpleBLE::BluetoothUUID("0000fff3-0000-1000-8000-00805f9b34fb");
-std::string ON_MESSAGE = "7e0704ff00010201ef";
-std::string OFF_MESSAGE = "7e07050300000010ef"; // RGB 0's
-
-
-#define INFO_LOG(msg) std::cout << "Info: " << msg << std::endl;
-#define ERROR_LOG(msg) std::cout << "Error: " << msg << std::endl;
-
-
-std::optional<SimpleBLE::Adapter> InitAdapter() {
-    if (!SimpleBLE::Adapter::bluetooth_enabled()) {
-        ERROR_LOG("Bluetooth is not enabled");
-        return std::nullopt;
-    }
-
-    auto adapters = SimpleBLE::Adapter::get_adapters();
-    if (adapters.empty()) {
-        ERROR_LOG("No Bluetooth adapters found");
-        return std::nullopt;
-    }
-
-    return adapters[0];
+// Helper function to get user input
+int getUserInput() {
+   int choice;
+   std::cin >> choice;
+   return choice;
 }
 
-std::optional<SimpleBLE::Peripheral> FindDevice(SimpleBLE::Adapter &adapter) {
-   adapter.scan_for(5000);
-   for (auto& peripheral : adapter.scan_get_results()) {
-      if (peripheral.address().find(device_address) != std::string::npos) {
-         return peripheral;
-      }
-   }
-   return std::nullopt;
-}
+int main() {
+   try {
+      // Define device configurations
+      std::vector<DeviceConfig> configs = {
+         {"BE:67:00:AC:C8:82", "0000fff0-0000-1000-8000-00805f9b34fb", "0000fff3-0000-1000-8000-00805f9b34fb"},
+         {"BE:67:00:6A:B5:A6", "0000fff0-0000-1000-8000-00805f9b34fb", "0000fff3-0000-1000-8000-00805f9b34fb"}
+         // Add more device configurations as needed
+      };
 
-bool ConnectToDevice(SimpleBLE::Peripheral &device) {
-   const int max_retries = 5;
-   const int retry_delay_ms = 1000;
+      // Initialize the BLE Manager
+      BLEManager manager(configs);
 
-   for (int attempt = 0; attempt < max_retries; ++attempt) {
-      try {
-         device.connect();
-         if (device.is_connected()) {
-            INFO_LOG("Connected to Device");
-            return true;
+      std::cout << "BLE Manager initialized successfully.\n";
+
+      while (true) {
+         std::cout << "\nChoose an action:\n"
+                     << "1. Turn on all devices\n"
+                     << "2. Turn off all devices\n"
+                     << "3. Set color for all devices\n"
+                     << "4. Exit\n"
+                     << "Enter your choice: ";
+
+         int choice = getUserInput();
+
+         switch (choice) {
+               case 1:
+                  manager.TurnOnDevices();
+                  std::cout << "All devices turned on.\n";
+                  break;
+               case 2:
+                  manager.TurnOffDevices();
+                  std::cout << "All devices turned off.\n";
+                  break;
+               case 3:
+                  {
+                     int r, g, b;
+                     std::cout << "Enter RGB values (0-255) separated by commas (e.g., 255,128,0): ";
+                     std::string input;
+                     std::getline(std::cin >> std::ws, input);
+                     
+                     std::istringstream iss(input);
+                     char comma;
+                     if (iss >> r >> comma >> g >> comma >> b) {
+                           if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+                              manager.SetDevicesColor(static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b));
+                              std::cout << "Color set for all devices.\n";
+                           } else {
+                              std::cout << "Invalid input. RGB values must be between 0 and 255.\n";
+                           }
+                     } else {
+                           std::cout << "Invalid input format. Please use comma-separated values.\n";
+                     }
+                  }
+                  break;
+               case 4:
+                  std::cout << "Exiting program.\n";
+                  return 0;
+               default:
+                  std::cout << "Invalid choice. Please try again.\n";
          }
-      } catch (const SimpleBLE::Exception::OperationFailed& e) {
-         ERROR_LOG("Connection failed: " + std::string(e.what()));
-      } catch (const std::exception& e) {
-         ERROR_LOG("Unexpected error during connection: " + std::string(e.what()));
-      }
 
-      if (attempt < max_retries - 1) {
-         INFO_LOG("Retrying in " + std::to_string(retry_delay_ms) + " ms...");
-         std::this_thread::sleep_for(std::chrono::milliseconds(retry_delay_ms));
+         // Small delay to prevent console spam
+         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }
    }
-   ERROR_LOG("Failed to connect after " + std::to_string(max_retries) + " attempts");
-   return false;
-}
-
-void PrintServiceInfo(SimpleBLE::Peripheral &device) {
-   for (auto &service : device.services()) {
-      INFO_LOG("Service UUID: " + service.uuid());
-      for (auto &c : service.characteristics()) {
-         INFO_LOG("\tCharacteristic UUID: " + std::string(c.uuid()));
-      }
+   catch (const std::exception& e) {
+      std::cerr << "An error occurred: " << e.what() << std::endl;
+      return 1;
    }
-}
 
-void SendHexMessage(SimpleBLE::Peripheral &device, const std::string &hexMessage) {
-    try {
-        SimpleBLE::ByteArray bytes = SimpleBLE::ByteArray::fromHex(hexMessage);
-        device.write_command(service_uuid, device_uuid, bytes);
-        INFO_LOG("Message sent successfully: " + hexMessage);
-    } catch (const SimpleBLE::Exception::OperationFailed& e) {
-        ERROR_LOG("Failed to send message: " + std::string(e.what()));
-    } catch (const std::exception& e) {
-        ERROR_LOG("Unexpected error while sending message: " + std::string(e.what()));
-    }
-}
-
-int main(int /* argc */, char** /* argv */) {
-   auto adapter = InitAdapter();
-   if (!adapter.has_value()) return 1;
-
-   auto device = FindDevice(adapter.value());
-   if (!device.has_value()) return 1;
-   std::this_thread::sleep_for(std::chrono::seconds(1));
-
-   if(!ConnectToDevice(device.value())) return 1;
-
-   SendHexMessage(*device, OFF_MESSAGE);
-   std::this_thread::sleep_for(std::chrono::seconds(5));
-   SendHexMessage(*device, ON_MESSAGE);
-   
-   device->disconnect();
    return 0;
 }
