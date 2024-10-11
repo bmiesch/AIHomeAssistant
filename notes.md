@@ -12,3 +12,8 @@ OFF: await self.send_msg("07", "05", "03", R, G, B, "10")
 
 I also worked out that 7e 07 04 ff 00 01 02 01 ef turns it on.
 7e 07 04 ff 00 01 02 01 ef
+
+
+
+Rpi4 IP ssh:  bmiesch@192.168.0.89
+Rpi20W IP ssh: bmiesch@192.168.0.148

@@ -19,9 +19,13 @@ SIMPLEBLE_LIB = -lsimpleble
 # D-Bus library flags
 DBUS_LIB = -ldbus-1
 
+# ASLA library flags
+ASLA_INCLUDE = -I/usr/include
+ASLA_LIB = -lasound
+
 # Flags for SimpleBLE dependencies
-CXXFLAGS += $(SIMPLEBLE_INCLUDE) $(INCLUDES)
-LDFLAGS = -L/usr/local/lib $(SIMPLEBLE_LIB) $(DBUS_LIB) -lpthread
+CXXFLAGS += $(SIMPLEBLE_INCLUDE) $(ASLA_INCLUDE) $(INCLUDES)
+LDFLAGS = -L/usr/local/lib $(SIMPLEBLE_LIB) $(DBUS_LIB) $(ASLA_LIB) -lpthread
 
 # The default rule
 all: $(TARGET)
