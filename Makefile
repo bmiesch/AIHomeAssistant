@@ -23,9 +23,13 @@ DBUS_LIB = -ldbus-1
 ASLA_INCLUDE = -I/usr/include
 ASLA_LIB = -lasound
 
+# PocketSphinx library flags
+POCKETSPHINX_INCLUDE = -I/usr/local/include/pocketsphinx
+POCKETSPHINX_LIB = -lpocketsphinx
+
 # Flags for SimpleBLE dependencies
-CXXFLAGS += $(SIMPLEBLE_INCLUDE) $(ASLA_INCLUDE) $(INCLUDES)
-LDFLAGS = -L/usr/local/lib $(SIMPLEBLE_LIB) $(DBUS_LIB) $(ASLA_LIB) -lpthread
+CXXFLAGS += $(SIMPLEBLE_INCLUDE) $(ASLA_INCLUDE) $(POCKETSPHINX_INCLUDE) $(INCLUDES)
+LDFLAGS = -L/usr/local/lib $(SIMPLEBLE_LIB) $(DBUS_LIB) $(ASLA_LIB) $(POCKETSPHINX_LIB) -lpthread
 
 # The default rule
 all: $(TARGET)
