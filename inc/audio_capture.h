@@ -9,6 +9,7 @@ private:
     unsigned int sample_rate;
     unsigned int channels;
     snd_pcm_format_t format;
+    snd_pcm_hw_params_t *params;
 
     void Init() {
         int rc;
@@ -19,22 +20,17 @@ private:
             throw std::runtime_error("Cannot open audio device: " + std::string(snd_strerror(rc)));
         }
 
-        snd_pcm_hw_params_t *params;
+        // Init parameters
         snd_pcm_hw_params_alloca(&params);
-        
-        // Fill params with default values
         snd_pcm_hw_params_any(capture_handle, params);
 
         // Set parameters
         rc = snd_pcm_hw_params_set_access(capture_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED);
         if (rc < 0) std::cerr << "Cannot set access type: " << snd_strerror(rc) << std::endl;
-
         rc = snd_pcm_hw_params_set_format(capture_handle, params, format);
         if (rc < 0) std::cerr << "Cannot set sample format: " << snd_strerror(rc) << std::endl;
-
         rc = snd_pcm_hw_params_set_channels(capture_handle, params, channels);
         if (rc < 0) std::cerr << "Cannot set channel count: " << snd_strerror(rc) << std::endl;
-
         rc = snd_pcm_hw_params_set_rate_near(capture_handle, params, &sample_rate, 0);
         if (rc < 0) std::cerr << "Cannot set sample rate: " << snd_strerror(rc) << std::endl;
 
@@ -44,25 +40,27 @@ private:
             throw std::runtime_error("Cannot set hardware parameters: " + std::string(snd_strerror(rc)));
         }
 
-        // Print current parameters
-        snd_pcm_uframes_t buffer_size;
-        snd_pcm_hw_params_get_buffer_size(params, &buffer_size);
-        std::cout << "Buffer size: " << buffer_size << " frames" << std::endl;
-
-        unsigned int actual_rate;
-        snd_pcm_hw_params_get_rate(params, &actual_rate, 0);
-        std::cout << "Actual sample rate: " << actual_rate << " Hz" << std::endl;
-
-        snd_pcm_format_t actual_format;
-        snd_pcm_hw_params_get_format(params, &actual_format);
-        std::cout << "Actual format: " << snd_pcm_format_name(actual_format) << std::endl;
-
-        unsigned int actual_channels;
-        snd_pcm_hw_params_get_channels(params, &actual_channels);
-        std::cout << "Actual channels: " << actual_channels << std::endl;
-
+        PrintCurrentParameters();
         snd_pcm_prepare(capture_handle);
     }
+
+    void PrintCurrentParameters() {
+        snd_pcm_uframes_t buffer_size;
+        unsigned int rate;
+        snd_pcm_format_t format;
+        unsigned int channels;
+
+        snd_pcm_hw_params_get_buffer_size(params, &buffer_size);
+        snd_pcm_hw_params_get_rate(params, &rate, nullptr);
+        snd_pcm_hw_params_get_format(params, &format);
+        snd_pcm_hw_params_get_channels(params, &channels);
+
+        std::cout << "Buffer size: " << buffer_size << " frames\n"
+                << "Sample rate: " << rate << " Hz\n"
+                << "Format: " << snd_pcm_format_name(format) << "\n"
+                << "Channels: " << channels << "\n";
+    }
+
 
 public:
     // Was: 48k, 1 channel, 32-bit
@@ -77,9 +75,9 @@ public:
         }
     }
 
-    std::vector<int32_t> CaptureAudio(unsigned int duration_ms) {
+    std::vector<int16_t> CaptureAudio(unsigned int duration_ms) {
         snd_pcm_uframes_t frames_to_read = (sample_rate * duration_ms) / 1000;
-        std::vector<int32_t> buffer(frames_to_read * channels);
+        std::vector<int16_t> buffer(frames_to_read * channels);
 
         std::cout << "Attempting to read " << frames_to_read << " frames" << std::endl;
 
