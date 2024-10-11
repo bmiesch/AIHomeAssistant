@@ -13,8 +13,6 @@ void Device::Connect() {
     const int MAX_ATTEMPTS = 3;
     const int RETRY_DELAY_MS = 1000;
 
-    INFO_LOG("Entering Connect function for Device: " + address);
-
     for (int i = 1; i <= MAX_ATTEMPTS; i++) {
         try {
             peripheral->connect();
