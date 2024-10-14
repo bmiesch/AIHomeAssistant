@@ -100,7 +100,7 @@ public:
         }
 
         std::cout << "Finished reading. Total frames: " << frames_read << std::endl;
-
+        snd_pcm_reset(capture_handle);        
         return buffer;
     }
 };

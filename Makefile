@@ -1,9 +1,9 @@
 # Compiler and flags
 CXX = g++
-CXXFLAGS = -Wall -Wextra -pedantic -std=c++17
+CXXFLAGS = -Wall -Wextra -pedantic -std=c++17 -g -O0
 
 # The name of the output binary
-TARGET = bluetooth_light_control
+TARGET = start
 
 # Source files
 SRCS = src/main.cpp src/manager.cpp src/device.cpp
