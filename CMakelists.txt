@@ -1,0 +1,43 @@
+cmake_minimum_required(VERSION 3.10)
+project(bmAI VERSION 1.0)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Add compiler flags
+add_compile_options(-Wall -Wextra -pedantic)
+
+# Source files
+set(SOURCES
+    src/main.cpp
+    src/manager.cpp
+    src/device.cpp
+)
+
+# Create executable
+add_executable(start ${SOURCES})
+
+# Include directories
+target_include_directories(start PRIVATE
+    ${CMAKE_SOURCE_DIR}/inc
+    ${CMAKE_SOURCE_DIR}/src
+    /usr/local/include  # SimpleBLE
+    /usr/include  # ALSA
+    /usr/local/include/pocketsphinx  # PocketSphinx
+)
+
+# Link libraries
+target_link_libraries(start PRIVATE
+    simpleble
+    dbus-1
+    asound
+    pocketsphinx
+    pthread
+)
+
+# Set library search path
+link_directories(/usr/local/lib)
+
+# Generate compile_commands.json for better IDE integration
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

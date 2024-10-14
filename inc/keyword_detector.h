@@ -3,6 +3,7 @@
 #include <iostream>
 #include <memory> 
 #include <stdexcept>
+#include <algorithm>
 
 
 class KeywordDetector {
@@ -51,10 +52,51 @@ public:
         }
 
         const char* hyp = ps_get_hyp(ps.get(), nullptr);
-        if (strcmp(hyp, "hello") && strcmp(hyp, "bam")) {
-            if (verbose) std::cout << "Activate Words Detected" << std::endl;
-            return true;
+        if (hyp != nullptr) {
+            std::string hypothesis(hyp);
+            std::transform(hypothesis.begin(), hypothesis.end(), hypothesis.begin(), ::tolower);
+            std::cout << hypothesis << std::endl;
+
+            // Check for individual words in the hypothesis
+            if (hypothesis.find("hello") != std::string::npos) {
+                if (verbose) std::cout << "Activate words detected" << std::endl;
+                return true;
+            }
+        } else {
+            std::cout << "Hypothesis not detected" << std::endl;
         }
         return false;
     }
+
+    void DetectCommand(const std::vector<int16_t>& buffer, bool verbose = false) {
+        if (ps_start_utt(ps.get()) < 0) {
+            throw std::runtime_error("Failed to start utterance");
+        }
+        
+        if (ps_process_raw(ps.get(), buffer.data(), buffer.size(), false, false) < 0) {
+            throw std::runtime_error("Failed to process audio");
+        }
+        
+        if (ps_end_utt(ps.get()) < 0) {
+            throw std::runtime_error("Failed to end utterance");
+        }
+
+        const char* hyp = ps_get_hyp(ps.get(), nullptr);
+        if (hyp != nullptr) {
+            std::string hypothesis(hyp);
+            std::transform(hypothesis.begin(), hypothesis.end(), hypothesis.begin(), ::tolower);
+
+            // Check for other keywords
+            if (hypothesis.find("turn on") != std::string::npos &&
+                hypothesis.find("light") != std::string::npos) {
+                if (verbose) std::cout << "Turning on light" << std::endl;
+            } else if (hypothesis.find("turn off") != std::string::npos && 
+                       hypothesis.find("light") != std::string::npos) {
+                if (verbose) std::cout << "Turning off light" << std::endl;
+            }
+        } else {
+            std::cout << "Hypothesis not detected" << std::endl;
+        }
+    }
+
 };
