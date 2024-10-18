@@ -19,3 +19,9 @@
 * Simple ON/OFF and color change commands working via bluetooth
 * How do I run this process constantly w/ low latency? 
   * Design a runtime and scheduling strategy
+
+
+# Random
+gRPC
+docker
+redis

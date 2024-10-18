@@ -1,5 +1,4 @@
-#ifndef DEVICE_H
-#define DEVICE_H
+#pragma once
 
 #include <string>
 #include <memory>
@@ -24,5 +23,3 @@ public:
     void TurnOff();
     void SetColor(uint8_t r, uint8_t g, uint8_t b);
 };
-
-#endif // DEVICE_H

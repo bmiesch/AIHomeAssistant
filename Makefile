@@ -1,12 +1,12 @@
 # Compiler and flags
-CXX = g++
+CXX = ccache g++
 CXXFLAGS = -Wall -Wextra -pedantic -std=c++17 -g -O0
 
 # The name of the output binary
 TARGET = start
 
 # Source files
-SRCS = src/main.cpp src/manager.cpp src/device.cpp
+SRCS := $(wildcard src/*.cpp)
 OBJS = $(SRCS:.cpp=.o)
 
 # Header files directory

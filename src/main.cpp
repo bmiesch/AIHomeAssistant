@@ -1,33 +1,41 @@
 #include "audio_capture.h"
 #include "keyword_detector.h"
+#include <atomic>
+#include <csignal>
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include "kernel.h"
+
+std::atomic<bool> should_run(true);
+Kernel* g_kernel = nullptr;
+
+void signalHandler(int signum) {
+   std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
+   should_run = false;
+   if (g_kernel) {
+      g_kernel->Stop();
+   }
+}
 
 int main() {
-   AudioCapture ac;
-   KeywordDetector kd;
+   std::signal(SIGINT, signalHandler);
+   std::signal(SIGTERM, signalHandler);
 
-   // // Capture audio
-   // std::cout << "Listening for 5 seconds..." << std::endl;
-   // auto buffer = ac.CaptureAudio(5000);
-
-   // // Print first 10 samples from buffer
-   // for (auto it = buffer.begin(); it != buffer.begin() + 10 && it != buffer.end(); ++it) {
-   //    std::cout << *it << " ";
-   // }
-   // std::cout << std::endl;
-
-   // kd.DetectKeyword(buffer, true);
-
-   try {
-      auto buffer = ac.CaptureAudio(5000);
-      if (kd.DetectKeyword(buffer, true)) {
-         // Detect Command
-         std::cout << "Listening for command..." << std::endl;
-         buffer = ac.CaptureAudio(5000);
-         kd.DetectCommand(buffer, true);
-      }
-   } catch (const std::exception& e) {
-      std::cerr << "Error: " << e.what() << std::endl;
-   }
+   Kernel kernel;
+   g_kernel = &kernel;
    
+   kernel.Run();
+
+   // Wait for a signal to stop
+   while(should_run) {
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+   }
+
+   std::cout << "Stopping kernel...\n";
+   kernel.Stop();
+
+   g_kernel = nullptr;
+   std::cout << "Kernel stopped. Exiting.\n";
    return 0;
 }
