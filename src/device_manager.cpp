@@ -1,7 +1,7 @@
-#include "manager.h"
+#include "device_manager.h"
 #include <stdexcept>
 
-void BLEManager::InitAdapter() {
+void DeviceManager::InitAdapter() {
     if (!SimpleBLE::Adapter::bluetooth_enabled()) {
         throw std::runtime_error("Bluetooth not enabled");
     }
@@ -12,7 +12,7 @@ void BLEManager::InitAdapter() {
     adapter = std::make_unique<SimpleBLE::Adapter>(std::move(adapters[0]));
 }
 
-void BLEManager::FindAndInitDevice(DeviceConfig& dc) {
+void DeviceManager::FindAndInitDevice(DeviceConfig& dc) {
     adapter->scan_for(5000);
     for (auto& peripheral : adapter->scan_get_results()) {
         if (peripheral.address().find(dc.address) != std::string::npos) {
@@ -27,7 +27,7 @@ void BLEManager::FindAndInitDevice(DeviceConfig& dc) {
     }
 }
 
-BLEManager::BLEManager(const std::vector<DeviceConfig>& configs) : device_configs(configs) {
+DeviceManager::DeviceManager(const std::vector<DeviceConfig>& configs) : device_configs(configs) {
     InitAdapter();
 
     for (auto& d : device_configs) {
@@ -35,21 +35,21 @@ BLEManager::BLEManager(const std::vector<DeviceConfig>& configs) : device_config
     }
 }
 
-BLEManager::~BLEManager() = default;
+DeviceManager::~DeviceManager() = default;
 
-void BLEManager::TurnOnDevices() {
+void DeviceManager::TurnOnDevices() {
     for (const auto& d : devices) {
         if (d->IsConnected()) d->TurnOn();
     }
 }
 
-void BLEManager::TurnOffDevices() {
+void DeviceManager::TurnOffDevices() {
     for (const auto& d : devices) {
         if (d->IsConnected()) d->TurnOff();
     }
 }
 
-void BLEManager::SetDevicesColor(int8_t r, int8_t g, int8_t b) {
+void DeviceManager::SetDevicesColor(int8_t r, int8_t g, int8_t b) {
     for (const auto& d : devices) {
         if (d->IsConnected()) d->SetColor(r,g,b);
     }

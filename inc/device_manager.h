@@ -1,5 +1,4 @@
-#ifndef BLE_MANAGER_H
-#define BLE_MANAGER_H
+#pragma once
 
 #include <vector>
 #include <memory>
@@ -13,7 +12,7 @@ struct DeviceConfig {
     SimpleBLE::BluetoothUUID char_uuid;
 };
 
-class BLEManager {
+class DeviceManager {
 private:
     std::vector<DeviceConfig> device_configs;
     std::vector<std::unique_ptr<Device>> devices;
@@ -23,12 +22,10 @@ private:
     void FindAndInitDevice(DeviceConfig& dc);
 
 public:
-    BLEManager(const std::vector<DeviceConfig>& configs);
-    ~BLEManager();
+    DeviceManager(const std::vector<DeviceConfig>& configs);
+    ~DeviceManager();
 
     void TurnOnDevices();
     void TurnOffDevices();
     void SetDevicesColor(int8_t r, int8_t g, int8_t b);
 };
-
-#endif // BLE_MANAGER_H
