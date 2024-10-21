@@ -17,3 +17,10 @@ I also worked out that 7e 07 04 ff 00 01 02 01 ef turns it on.
 
 Rpi4 IP ssh:  bmiesch@192.168.0.89
 Rpi20W IP ssh: bmiesch@192.168.0.148
+
+
+Docker Notes:
+docker build -t my_ble_app .
+docker run -it --name ble_dev -v $(pwd):/app my_ble_app /bin/bash
+Leave container with exit
+docker start -i ble_dev

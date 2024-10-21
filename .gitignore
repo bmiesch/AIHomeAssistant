@@ -1,2 +1,3 @@
 .vscode
 bm
+*.cross.o

@@ -3,6 +3,7 @@ FROM arm64v8/debian:bookworm
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
+    crossbuild-essential-arm64 \
     ccache \
     g++ \
     make \
@@ -43,10 +44,11 @@ ENV CCACHE_DIR=/ccache
 RUN mkdir -p /ccache
 
 # Set compiler to use ccache
+ENV CROSS_COMPILE aarch64-linux-gnu-
 ENV CXX="ccache g++"
 
 # Compile the project
-RUN make
+RUN make CC=${CROSS_COMPILE}gcc CXX=${CROSS_COMPILE}g++
 
 # Set the default command to run your application
 CMD ["./start"]
