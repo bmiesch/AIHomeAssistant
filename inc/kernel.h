@@ -23,8 +23,11 @@ private:
     std::mutex audio_queue_mutex;
     std::condition_variable audio_queue_cv;
 
+    std::atomic<Command> command;
+
     void AudioCaptureLoop();
     void AudioProcessingLoop();
+    void ExecuteCommand();
 
 public:
     Kernel();

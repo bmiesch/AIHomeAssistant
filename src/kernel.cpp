@@ -39,7 +39,7 @@ void Kernel::AudioProcessingLoop() {
             }
 
             Command cmd = keyword_detector->DetectCommand(command_buffer, true);
-
+            DeviceManager* device_manager = DeviceManagerSingleton::getInstance();
             switch(cmd) {
                 case Command::TURN_ON:
                     device_manager->TurnOnDevices();
@@ -72,7 +72,7 @@ Kernel::Kernel() {
 
     // Initialize modules
     audio_capture = std::make_unique<AudioCapture>();
-    device_manager = std::make_unique<DeviceManager>(device_configs);
+    // device_manager = std::make_unique<DeviceManager>(device_configs);
     keyword_detector = std::make_unique<KeywordDetector>();
 }
 
