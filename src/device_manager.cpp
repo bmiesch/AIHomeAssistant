@@ -1,6 +1,9 @@
 #include "device_manager.h"
 #include <stdexcept>
 
+std::unique_ptr<DeviceManager> DeviceManagerSingleton::instance;
+
+
 void DeviceManager::InitAdapter() {
     if (!SimpleBLE::Adapter::bluetooth_enabled()) {
         throw std::runtime_error("Bluetooth not enabled");
