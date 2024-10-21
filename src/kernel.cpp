@@ -57,22 +57,8 @@ void Kernel::AudioProcessingLoop() {
 }
 
 Kernel::Kernel() {
-    std::vector<DeviceConfig> device_configs = {
-        DeviceConfig{
-            "BE:67:00:AC:C8:82",
-            SimpleBLE::BluetoothUUID("0000fff0-0000-1000-8000-00805f9b34fb"),
-            SimpleBLE::BluetoothUUID("0000fff3-0000-1000-8000-00805f9b34fb")
-        },
-        DeviceConfig{
-            "BE:67:00:6A:B5:A6",
-            SimpleBLE::BluetoothUUID("0000fff0-0000-1000-8000-00805f9b34fb"),
-            SimpleBLE::BluetoothUUID("0000fff3-0000-1000-8000-00805f9b34fb")
-        }
-    };
-
     // Initialize modules
     audio_capture = std::make_unique<AudioCapture>();
-    // device_manager = std::make_unique<DeviceManager>(device_configs);
     keyword_detector = std::make_unique<KeywordDetector>();
 }
 

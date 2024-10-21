@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <mutex>
 #include <simpleble/SimpleBLE.h>
 #include "device.h"
 

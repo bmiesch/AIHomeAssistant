@@ -27,7 +27,6 @@ private:
 
     void AudioCaptureLoop();
     void AudioProcessingLoop();
-    void ExecuteCommand();
 
 public:
     Kernel();
