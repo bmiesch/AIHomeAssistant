@@ -1,13 +1,16 @@
 # Compiler and flags
 CXX = ccache g++
+CROSS_CXX = ccache aarch64-linux-gnu-g++
 CXXFLAGS = -Wall -Wextra -pedantic -std=c++17 -g -O0
 
 # The name of the output binary
 TARGET = start
+CROSS_TARGET = start_arm64
 
 # Source files
 SRCS := $(wildcard src/*.cpp)
 OBJS = $(SRCS:.cpp=.o)
+CROSS_OBJS = $(SRCS:.cpp=.cross.o)
 
 # Header files directory
 INCLUDES = -Iinc -Isrc
@@ -42,8 +45,17 @@ $(TARGET): $(OBJS)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+# Cross-compilation rules
+cross: $(CROSS_TARGET)
+
+$(CROSS_TARGET): $(CROSS_OBJS)
+	$(CROSS_CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+%.cross.o: %.cpp
+	$(CROSS_CXX) $(CXXFLAGS) -c $< -o $@
+
 # Clean up build artifacts
 clean:
-	rm -f $(TARGET) $(OBJS)
+	rm -f $(TARGET) $(CROSS_TARGET) $(OBJS) $(CROSS_OBJS)
 
-.PHONY: all clean
+.PHONY: all clean cross
