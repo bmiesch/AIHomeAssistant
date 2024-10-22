@@ -60,6 +60,7 @@ Kernel::Kernel() {
     // Initialize modules
     audio_capture = std::make_unique<AudioCapture>();
     keyword_detector = std::make_unique<KeywordDetector>();
+    DeviceManager* device_manager = DeviceManagerSingleton::getInstance();
 }
 
 Kernel::~Kernel() {
