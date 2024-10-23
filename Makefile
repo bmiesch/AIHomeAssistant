@@ -30,9 +30,13 @@ ASLA_LIB = -lasound
 POCKETSPHINX_INCLUDE = -I/usr/local/include/pocketsphinx
 POCKETSPHINX_LIB = -lpocketsphinx
 
-# Flags for SimpleBLE dependencies
-CXXFLAGS += $(SIMPLEBLE_INCLUDE) $(ASLA_INCLUDE) $(POCKETSPHINX_INCLUDE) $(INCLUDES)
-LDFLAGS = -L/usr/local/lib $(SIMPLEBLE_LIB) $(DBUS_LIB) $(ASLA_LIB) $(POCKETSPHINX_LIB) -lpthread
+# Paho MQTT C++ library flags
+PAHO_MQTT_INCLUDE = -I/usr/local/include
+PAHO_MQTT_LIB = -lpaho-mqttpp3 -lpaho-mqtt3as
+
+# Update CXXFLAGS and LDFLAGS
+CXXFLAGS += $(SIMPLEBLE_INCLUDE) $(ASLA_INCLUDE) $(POCKETSPHINX_INCLUDE) $(PAHO_MQTT_INCLUDE) $(INCLUDES)
+LDFLAGS = -L/usr/local/lib $(SIMPLEBLE_LIB) $(DBUS_LIB) $(ASLA_LIB) $(POCKETSPHINX_LIB) $(PAHO_MQTT_LIB) -lpthread
 
 # The default rule
 all: $(TARGET)
