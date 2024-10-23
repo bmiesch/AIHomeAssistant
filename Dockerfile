@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     libdbus-1-dev \
     git \
     cmake \
+    libssl-dev \
+    nlohmann-json3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -30,6 +32,16 @@ RUN cmake -Bbuild -H. -DCMAKE_BUILD_TYPE=Release
 RUN cmake --build build --config Release --target all -v
 RUN cmake --install build --config Release
 
+# Build paho-mqtt-cpp from source
+WORKDIR /
+RUN git clone https://github.com/eclipse/paho.mqtt.cpp.git
+WORKDIR /paho.mqtt.cpp
+RUN git checkout v1.4.0
+RUN git submodule init
+RUN git submodule update
+RUN cmake -Bbuild -H. -DPAHO_WITH_MQTT_C=ON -DPAHO_BUILD_EXAMPLES=ON -DPAHO_WITH_SSL=ON
+RUN cmake --build build/ --target install
+RUN ldconfig
 
 # Set up working directory
 WORKDIR /app
