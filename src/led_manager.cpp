@@ -1,4 +1,5 @@
 #include "led_manager.h"
+#include "log.h"
 
 using json = nlohmann::json;
 
@@ -11,10 +12,12 @@ LEDManager::LEDManager(const std::vector<DeviceConfig>& configs, const std::stri
         .automatic_reconnect(true)
         .finalize()) {
     
+    INFO_LOG("Initializing LEDManager with broker: " + broker_address + ", client_id: " + client_id);
     mqtt_client.set_callback(*this);
 }
 
 LEDManager::~LEDManager() {
+    DEBUG_LOG("LEDManager destructor called");
     Stop();
 }
 
@@ -25,15 +28,19 @@ void LEDManager::Initialize() {
     }
 
     try {
+        INFO_LOG("Connecting to MQTT broker...");
         mqtt::token_ptr conntok = mqtt_client.connect(mqtt_conn_opts);
         conntok->wait();
         mqtt_client.subscribe(COMMAND_TOPIC, 1);
+        INFO_LOG("Successfully connected to MQTT broker");
     } catch (const mqtt::exception& e) {
-        std::cerr << "Error connecting to MQTT broker: " << e.what() << std::endl;
+        ERROR_LOG("Error connecting to MQTT broker: " + std::string(e.what()));
+        throw;
     }
 }
 
 void LEDManager::Run() {
+    INFO_LOG("LEDManager running...");
     while (true) {
         std::this_thread::sleep_for(std::chrono::seconds(5));
         PublishStatus();
@@ -42,26 +49,32 @@ void LEDManager::Run() {
 
 void LEDManager::Stop() {
     try {
+        INFO_LOG("Stopping LEDManager...");
         mqtt_client.disconnect()->wait();
+        DEBUG_LOG("MQTT client disconnected");
     } catch (const mqtt::exception& e) {
-        std::cerr << "Error disconnecting from MQTT broker: " << e.what() << std::endl;
+        ERROR_LOG("Error disconnecting from MQTT broker: " + std::string(e.what()));
     }
 }
 
 void LEDManager::InitAdapter() {
+    DEBUG_LOG("Initializing Bluetooth adapter");
     auto adapters = SimpleBLE::Adapter::get_adapters();
     if (adapters.empty()) {
+        ERROR_LOG("No Bluetooth adapters found");
         throw std::runtime_error("No Bluetooth adapters found");
     }
     adapter = std::make_unique<SimpleBLE::Adapter>(adapters[0]);
-    adapter->set_callback_on_scan_start([]() { std::cout << "Scan started." << std::endl; });
-    adapter->set_callback_on_scan_stop([]() { std::cout << "Scan stopped." << std::endl; });
+    adapter->set_callback_on_scan_start([]() { DEBUG_LOG("Scan started"); });
+    adapter->set_callback_on_scan_stop([]() { DEBUG_LOG("Scan stopped"); });
     adapter->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
-        std::cout << "Found device: " << peripheral.address() << std::endl;
+        DEBUG_LOG("Found device: " + peripheral.address());
     });
+    INFO_LOG("Bluetooth adapter initialized successfully");
 }
 
 void LEDManager::FindAndInitDevice(const DeviceConfig& dc) {
+    INFO_LOG("Scanning for device: " + dc.address);
     adapter->scan_for(5000);
     auto peripherals = adapter->scan_get_results();
     for (auto& peripheral : peripherals) {
@@ -74,14 +87,17 @@ void LEDManager::FindAndInitDevice(const DeviceConfig& dc) {
                 dc.char_uuid);
             std::lock_guard<std::mutex> lock(devices_mutex);
             devices.push_back(std::move(device));
+            INFO_LOG("Successfully initialized device: " + dc.address);
             return;
         }
     }
-    std::cerr << "Device not found: " << dc.address << std::endl;
+    WARN_LOG("Device not found: " + dc.address);
 }
 
 void LEDManager::HandleCommand(const json& command) {
     std::string action = command["action"];
+    DEBUG_LOG("Handling command: " + action);
+    
     if (action == "turn_on") {
         TurnOnAll();
     } else if (action == "turn_off") {
@@ -90,17 +106,17 @@ void LEDManager::HandleCommand(const json& command) {
         int r = command["params"]["r"];
         int g = command["params"]["g"];
         int b = command["params"]["b"];
+        DEBUG_LOG("Setting color (R:" + std::to_string(r) + 
+                 ", G:" + std::to_string(g) + 
+                 ", B:" + std::to_string(b) + ")");
         SetColor(r, g, b);
+    } else {
+        WARN_LOG("Unknown command received: " + action);
     }
-    // else if (action == "set_individual") {
-    //     std::string address = command["params"]["address"];
-    //     std::string led_action = command["params"]["action"];
-    //     json led_params = command["params"]["params"];
-    //     SetIndividualLED(address, led_action, led_params);
-    // }
 }
 
 void LEDManager::TurnOnAll() {
+    INFO_LOG("Turning on all devices");
     std::lock_guard<std::mutex> lock(devices_mutex);
     for (auto& device : devices) {
         device->TurnOn();
@@ -108,6 +124,7 @@ void LEDManager::TurnOnAll() {
 }
 
 void LEDManager::TurnOffAll() {
+    INFO_LOG("Turning off all devices");
     std::lock_guard<std::mutex> lock(devices_mutex);
     for (auto& device : devices) {
         device->TurnOff();
@@ -115,6 +132,9 @@ void LEDManager::TurnOffAll() {
 }
 
 void LEDManager::SetColor(int r, int g, int b) {
+    INFO_LOG("Setting color for all devices (R:" + std::to_string(r) + 
+             ", G:" + std::to_string(g) + 
+             ", B:" + std::to_string(b) + ")");
     std::lock_guard<std::mutex> lock(devices_mutex);
     for (auto& device : devices) {
         device->SetColor(r, g, b);
@@ -127,36 +147,35 @@ void LEDManager::PublishStatus() {
     status["device_count"] = devices.size();
     
     try {
+        DEBUG_LOG("Publishing status update");
         mqtt_client.publish(STATUS_TOPIC, status.dump(), 1, false);
     } catch (const mqtt::exception& e) {
-        std::cerr << "Error publishing status: " << e.what() << std::endl;
+        ERROR_LOG("Error publishing status: " + std::string(e.what()));
     }
 }
 
-
-
 void LEDManager::connected(const std::string& cause) {
-    std::cout << "Connected to MQTT broker: " << cause << std::endl;
+    INFO_LOG("Connected to MQTT broker: " + cause);
     mqtt_client.subscribe(COMMAND_TOPIC, 1);
 }
 
 void LEDManager::connection_lost(const std::string& cause) {
-    std::cout << "Connection lost: " << cause << std::endl;
+    WARN_LOG("MQTT connection lost: " + cause);
 }
 
 void LEDManager::message_arrived(mqtt::const_message_ptr msg) {
     if (msg->get_topic() == COMMAND_TOPIC) {
         try {
+            DEBUG_LOG("Received message on command topic");
             json command = json::parse(msg->get_payload());
             HandleCommand(command);
         } catch (const json::parse_error& e) {
-            std::cerr << "Error parsing command: " << e.what() << std::endl;
+            ERROR_LOG("Error parsing command: " + std::string(e.what()));
         }
     }
 }
 
 void LEDManager::delivery_complete(mqtt::delivery_token_ptr token) {
     (void)token;
-    std::cout << "Message delivered" << std::endl;
-    // This method is called when a message is successfully delivered to the broker
+    DEBUG_LOG("MQTT message delivered");
 }

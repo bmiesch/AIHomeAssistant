@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y \
     cmake \
     libssl-dev \
     nlohmann-json3-dev \
+    mosquitto \
+    mosquitto-clients \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -62,5 +64,5 @@ ENV CXX="ccache g++"
 # Compile the project
 RUN make CC=${CROSS_COMPILE}gcc CXX=${CROSS_COMPILE}g++
 
-# Set the default command to run your application
-CMD ["./start"]
+# # Set the default command to run your application
+# CMD ["./start"]

@@ -27,9 +27,10 @@ int main() {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
-    std::string broker_address = "tcp://localhost:1883";  // Replace with your MQTT broker address
+   // Default address for Mosquitto MQTT Broker
+   std::string broker_address = "tcp://localhost:1883";
 
-    // LED configurations
+   // LED configurations
    std::vector<DeviceConfig> device_configs = {
       DeviceConfig{
             "BE:67:00:AC:C8:82",
@@ -43,48 +44,48 @@ int main() {
       }
    };
 
-    try {
-        Kernel kernel(broker_address, "kernel_client");
-        LEDManager led_manager(device_configs, broker_address, "led_manager_client");
+   try {
+      Kernel kernel(broker_address, "kernel_client");
+      LEDManager led_manager(device_configs, broker_address, "led_manager_client");
 
-        g_kernel = &kernel;
-        g_led_manager = &led_manager;
+      g_kernel = &kernel;
+      g_led_manager = &led_manager;
 
-        kernel.Initialize();
-        led_manager.Initialize();
+      kernel.Initialize();
+      led_manager.Initialize();
 
-        std::thread kernel_thread([&kernel]() {
-            while (should_run) {
-                kernel.Run();
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-        });
+      std::thread kernel_thread([&kernel]() {
+         while (should_run) {
+            kernel.Run();
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+         }
+      });
 
-        std::thread led_manager_thread([&led_manager]() {
-            while (should_run) {
-                led_manager.Run();
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-        });
+      std::thread led_manager_thread([&led_manager]() {
+         while (should_run) {
+            led_manager.Run();
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+         }
+      });
 
-        // Wait for a signal to stop
-        while(should_run) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
+      // Wait for a signal to stop
+      while(should_run) {
+         std::this_thread::sleep_for(std::chrono::seconds(1));
+      }
 
-        std::cout << "Stopping kernel and LED manager...\n";
+      std::cout << "Stopping kernel and LED manager...\n";
 
-        kernel_thread.join();
-        led_manager_thread.join();
+      kernel_thread.join();
+      led_manager_thread.join();
 
-        g_kernel = nullptr;
-        g_led_manager = nullptr;
+      g_kernel = nullptr;
+      g_led_manager = nullptr;
 
-        std::cout << "Kernel and LED manager stopped. Exiting.\n";
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
-        return 1;
-    }
+      std::cout << "Kernel and LED manager stopped. Exiting.\n";
+   } catch (const std::exception& e) {
+      std::cerr << "Error: " << e.what() << std::endl;
+      return 1;
+   }
 
-    return 0;
+   return 0;
 }

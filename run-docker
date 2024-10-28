@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# Store the script's directory (project root)
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Function to build the Docker images
+build_images() {
+  echo "Building Docker images..."
+  cd "${PROJECT_ROOT}/.docker/compile" && docker-compose build
+}
+
+# Function to start the services
+start_services() {
+  echo "Starting services..."
+  cd "${PROJECT_ROOT}/.docker/compile" && docker-compose up -d
+}
+
+recompile_code() {
+  echo "Recompiling code..."
+  cd "${PROJECT_ROOT}/.docker/compile" && docker-compose exec app sh -c "cd /app/build && make clean && make cross"
+}
+
+# Check if the images need to be built
+if [ "$1" == "build" ]; then
+  build_images
+fi
+
+# Start the services
+start_services
+
+# Recompile the code
+recompile_code
+
+# Copy the binary from docker container to the project root
+cd "${PROJECT_ROOT}/.docker/compile" && docker-compose exec app sh -c "cp /app/build/start_arm64 /app/source/start_arm64"

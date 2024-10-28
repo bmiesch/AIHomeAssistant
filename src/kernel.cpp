@@ -1,10 +1,9 @@
 #include "kernel.h"
-#include <iostream>
+#include "log.h"
 #include <chrono>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
-
 
 void Kernel::AudioCaptureLoop() {
     while(running) {
@@ -14,6 +13,7 @@ void Kernel::AudioCaptureLoop() {
             audio_queue.push(std::move(buffer));
         }
         audio_queue_cv.notify_one();
+        DEBUG_LOG("Audio captured and queued");
     }
 }
 
@@ -29,7 +29,7 @@ void Kernel::AudioProcessingLoop() {
         }
 
         if (keyword_detector->DetectKeyword(buffer, true)) {
-            std::cout << "Keyword detected! Listening for command..." << std::endl;
+            INFO_LOG("Keyword detected! Listening for command...");
             
             // Collect audio for 5 seconds (5 buffers of 1000ms each)
             std::vector<int16_t> command_buffer;
@@ -46,14 +46,16 @@ void Kernel::AudioProcessingLoop() {
 
             switch(cmd) {
                 case Command::TURN_ON:
+                    INFO_LOG("Command detected: TURN_ON");
                     PublishLEDManagerCommand("turn_on", json::object());
                     break;
                 case Command::TURN_OFF:
+                    INFO_LOG("Command detected: TURN_OFF");
                     PublishLEDManagerCommand("turn_off", json::object());
                     break;
                 case Command::NO_COMMAND:
                 default:
-                    std::cout << "No command detected." << std::endl; 
+                    WARN_LOG("No command detected");
                     break;
             }
         }
@@ -68,7 +70,7 @@ Kernel::Kernel(const std::string& broker_address, const std::string& client_id)
         .automatic_reconnect(true)
         .finalize()) {
 
-    // Initialize modules
+    INFO_LOG("Initializing Kernel with broker: " + broker_address + ", client_id: " + client_id);
     audio_capture = std::make_unique<AudioCapture>();
     keyword_detector = std::make_unique<KeywordDetector>();
     
@@ -76,26 +78,28 @@ Kernel::Kernel(const std::string& broker_address, const std::string& client_id)
 }
 
 Kernel::~Kernel() {
+    DEBUG_LOG("Kernel destructor called");
     Stop();
 }
 
 void Kernel::Initialize() {
     try {
+        INFO_LOG("Connecting to MQTT broker...");
         mqtt::token_ptr conntok = mqtt_client.connect(mqtt_conn_opts);
         conntok->wait();
     } catch (const mqtt::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        ERROR_LOG("MQTT connection error: " + std::string(e.what()));
+        throw;
     }
 }
 
 void Kernel::Run() {
     running = true;
+    INFO_LOG("Starting Kernel threads");
 
-    // Initialize threads
     audio_thread = std::thread(&Kernel::AudioCaptureLoop, this);
     audio_processing_thread = std::thread(&Kernel::AudioProcessingLoop, this);
 
-    // Wait for tasks
     while (running) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
@@ -105,16 +109,19 @@ void Kernel::Run() {
 }   
 
 void Kernel::Stop() {
+    INFO_LOG("Stopping Kernel");
     running = false;
     audio_queue_cv.notify_all();
+    
     if (audio_thread.joinable()) audio_thread.join();
     if (audio_processing_thread.joinable()) audio_processing_thread.join();
 
     try {
         mqtt_client.disconnect()->wait();
+        DEBUG_LOG("MQTT client disconnected");
     }
     catch (const mqtt::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        ERROR_LOG("MQTT disconnect error: " + std::string(e.what()));
     }
 }
 
@@ -125,37 +132,40 @@ void Kernel::PublishLEDManagerCommand(const std::string& command, const json& pa
     std::string topic = "home/services/led_manager/command";
     std::string payload = message.dump();
 
+    DEBUG_LOG("Publishing command: " + command + " to topic: " + topic);
     try {
         mqtt_client.publish(topic, payload, 1, false)->wait_for(std::chrono::seconds(10));
     } catch (const mqtt::exception& e) {
-        std::cerr << "Error publishing command: " << e.what() << std::endl;
+        ERROR_LOG("Error publishing command: " + std::string(e.what()));
+        throw;
     }
 }
 
 void Kernel::connected(const std::string& cause) {
-    std::cout << "Connected to MQTT broker: " << cause << std::endl;
+    INFO_LOG("Connected to MQTT broker: " + cause);
     mqtt_client.subscribe("home/devices/#", 0);
 }
 
 void Kernel::connection_lost(const std::string& cause) {
-    std::cout << "Connection lost: " << cause << std::endl;
+    WARN_LOG("MQTT connection lost: " + cause);
 }
 
 void Kernel::message_arrived(mqtt::const_message_ptr msg) {
     std::string topic = msg->get_topic();
     std::string payload = msg->to_string();
 
+    DEBUG_LOG("Message received - Topic: " + topic + ", Payload: " + payload);
     if (topic.find("home/services/") == 0) {
         HandleServiceStatus(topic, payload);
     }    
 }
 
 void Kernel::HandleServiceStatus(const std::string& topic, const std::string& payload) {
-    std::cout << "Service status update: " << topic << " - " << payload << std::endl;
+    DEBUG_LOG("Service status update - Topic: " + topic + ", Payload: " + payload);
     // React to service status changes if necessary
 }
 
 void Kernel::delivery_complete(mqtt::delivery_token_ptr token) {
     (void)token;
-    std::cout << "Message delivered" << std::endl;
+    DEBUG_LOG("MQTT message delivered");
 }
