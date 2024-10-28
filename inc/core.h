@@ -13,7 +13,7 @@
 using json = nlohmann::json;
 
 
-class Kernel : public virtual mqtt::callback {
+class Core : public virtual mqtt::callback {
 private:
     std::unique_ptr<AudioCapture> audio_capture;
     std::unique_ptr<KeywordDetector> keyword_detector;
@@ -42,8 +42,8 @@ private:
     void HandleServiceStatus(const std::string& topic, const std::string& payload);
 
 public:
-    Kernel(const std::string& broker_address, const std::string& client_id);
-    ~Kernel();
+    Core(const std::string& broker_address, const std::string& client_id);
+    ~Core();
 
     void Initialize();
     void Run();

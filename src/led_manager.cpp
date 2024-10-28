@@ -3,7 +3,7 @@
 
 using json = nlohmann::json;
 
-LEDManager::LEDManager(const std::vector<DeviceConfig>& configs, const std::string& broker_address, const std::string& client_id)
+LEDManager::LEDManager(const std::vector<BLEDeviceConfig>& configs, const std::string& broker_address, const std::string& client_id)
     : device_configs(configs),
       mqtt_client(broker_address, client_id),
       mqtt_conn_opts(mqtt::connect_options_builder()
@@ -23,9 +23,7 @@ LEDManager::~LEDManager() {
 
 void LEDManager::Initialize() {
     InitAdapter();
-    for (auto& config : device_configs) {
-        FindAndInitDevice(config);
-    }
+    FindAndInitDevices(device_configs);
 
     try {
         INFO_LOG("Connecting to MQTT broker...");
@@ -65,33 +63,39 @@ void LEDManager::InitAdapter() {
         throw std::runtime_error("No Bluetooth adapters found");
     }
     adapter = std::make_unique<SimpleBLE::Adapter>(adapters[0]);
-    adapter->set_callback_on_scan_start([]() { DEBUG_LOG("Scan started"); });
-    adapter->set_callback_on_scan_stop([]() { DEBUG_LOG("Scan stopped"); });
-    adapter->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
-        DEBUG_LOG("Found device: " + peripheral.address());
-    });
+    // adapter->set_callback_on_scan_start([]() { DEBUG_LOG("Scan started"); });
+    // adapter->set_callback_on_scan_stop([]() { DEBUG_LOG("Scan stopped"); });
+    // adapter->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
+    //     DEBUG_LOG("Found device: " + peripheral.address());
+    // });
     INFO_LOG("Bluetooth adapter initialized successfully");
 }
 
-void LEDManager::FindAndInitDevice(const DeviceConfig& dc) {
-    INFO_LOG("Scanning for device: " + dc.address);
+void LEDManager::FindAndInitDevices(std::vector<BLEDeviceConfig>& dc) {
     adapter->scan_for(5000);
     auto peripherals = adapter->scan_get_results();
-    for (auto& peripheral : peripherals) {
-        if (peripheral.address() == dc.address) {
-            auto peripheral_ptr = std::make_unique<SimpleBLE::Peripheral>(std::move(peripheral));
-            auto device = std::make_unique<Device>(
-                std::move(peripheral_ptr),
-                dc.address,
-                dc.serv_uuid,
-                dc.char_uuid);
-            std::lock_guard<std::mutex> lock(devices_mutex);
-            devices.push_back(std::move(device));
-            INFO_LOG("Successfully initialized device: " + dc.address);
-            return;
+
+    for(const auto& config : dc) {
+        INFO_LOG("Scanning for device: " + config.address);
+        bool found = false;
+
+        for (auto& peripheral : peripherals) {
+            if (peripheral.address() == config.address) {
+                auto peripheral_ptr = std::make_unique<SimpleBLE::Peripheral>(std::move(peripheral));
+                auto device = std::make_unique<BLEDevice>(
+                    std::move(peripheral_ptr),
+                    config.address,
+                    config.serv_uuid,
+                    config.char_uuid);
+                std::lock_guard<std::mutex> lock(devices_mutex);
+                devices.push_back(std::move(device));
+                INFO_LOG("Successfully initialized device: " + config.address);
+                found = true;
+                break;
+            }
         }
+        if(!found) WARN_LOG("Device not found: " + config.address);
     }
-    WARN_LOG("Device not found: " + dc.address);
 }
 
 void LEDManager::HandleCommand(const json& command) {
