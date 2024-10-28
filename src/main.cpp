@@ -1,4 +1,4 @@
-#include "kernel.h"
+#include "core.h"
 #include "led_manager.h"
 #include <atomic>
 #include <csignal>
@@ -9,14 +9,14 @@
 
 
 std::atomic<bool> should_run(true);
-Kernel* g_kernel = nullptr;
+Core* g_core = nullptr;
 LEDManager* g_led_manager = nullptr;
 
 void signalHandler(int signum) {
     std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
     should_run = false;
-    if (g_kernel) {
-        g_kernel->Stop();
+    if (g_core) {
+        g_core->Stop();
     }
     if (g_led_manager) {
         g_led_manager->Stop();
@@ -31,13 +31,13 @@ int main() {
    std::string broker_address = "tcp://localhost:1883";
 
    // LED configurations
-   std::vector<DeviceConfig> device_configs = {
-      DeviceConfig{
+   std::vector<BLEDeviceConfig> device_configs = {
+      BLEDeviceConfig{
             "BE:67:00:AC:C8:82",
             SimpleBLE::BluetoothUUID("0000fff0-0000-1000-8000-00805f9b34fb"),
             SimpleBLE::BluetoothUUID("0000fff3-0000-1000-8000-00805f9b34fb")
       },
-      DeviceConfig{
+      BLEDeviceConfig{
             "BE:67:00:6A:B5:A6",
             SimpleBLE::BluetoothUUID("0000fff0-0000-1000-8000-00805f9b34fb"),
             SimpleBLE::BluetoothUUID("0000fff3-0000-1000-8000-00805f9b34fb")
@@ -45,18 +45,18 @@ int main() {
    };
 
    try {
-      Kernel kernel(broker_address, "kernel_client");
+      Core core(broker_address, "core_client");
       LEDManager led_manager(device_configs, broker_address, "led_manager_client");
 
-      g_kernel = &kernel;
+      g_core = &core;
       g_led_manager = &led_manager;
 
-      kernel.Initialize();
+      core.Initialize();
       led_manager.Initialize();
 
-      std::thread kernel_thread([&kernel]() {
+      std::thread core_thread([&core]() {
          while (should_run) {
-            kernel.Run();
+            core.Run();
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
          }
       });
@@ -73,15 +73,15 @@ int main() {
          std::this_thread::sleep_for(std::chrono::seconds(1));
       }
 
-      std::cout << "Stopping kernel and LED manager...\n";
+      std::cout << "Stopping core and LED manager...\n";
 
-      kernel_thread.join();
+      core_thread.join();
       led_manager_thread.join();
 
-      g_kernel = nullptr;
+      g_core = nullptr;
       g_led_manager = nullptr;
 
-      std::cout << "Kernel and LED manager stopped. Exiting.\n";
+      std::cout << "Core and LED manager stopped. Exiting.\n";
    } catch (const std::exception& e) {
       std::cerr << "Error: " << e.what() << std::endl;
       return 1;

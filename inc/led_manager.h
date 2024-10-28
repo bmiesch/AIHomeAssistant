@@ -7,26 +7,20 @@
 #include <simpleble/SimpleBLE.h>
 #include <nlohmann/json.hpp>
 #include <mqtt/async_client.h>
-#include "device.h"
+#include "ble_device.h"
 
 using json = nlohmann::json;
 
 
-struct DeviceConfig {
-    std::string address;
-    SimpleBLE::BluetoothUUID serv_uuid;
-    SimpleBLE::BluetoothUUID char_uuid;
-};
-
 class LEDManager : public virtual mqtt::callback {
 private:
-    std::vector<DeviceConfig> device_configs;
-    std::vector<std::unique_ptr<Device>> devices;
+    std::vector<BLEDeviceConfig> device_configs;
+    std::vector<std::unique_ptr<BLEDevice>> devices;
     std::unique_ptr<SimpleBLE::Adapter> adapter;
     std::mutex devices_mutex;
 
     void InitAdapter();
-    void FindAndInitDevice(const DeviceConfig& dc);
+    void FindAndInitDevices(std::vector<BLEDeviceConfig>& dc);
     void HandleCommand(const json& command);
     void PublishStatus();
 
@@ -50,7 +44,7 @@ private:
     void delivery_complete(mqtt::delivery_token_ptr token) override;
 
 public:
-    LEDManager(const std::vector<DeviceConfig>& configs, const std::string& broker_address,
+    LEDManager(const std::vector<BLEDeviceConfig>& configs, const std::string& broker_address,
                const std::string& client_id);
     ~LEDManager();
 

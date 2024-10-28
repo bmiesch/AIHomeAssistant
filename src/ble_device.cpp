@@ -1,9 +1,9 @@
-#include "device.h"
+#include "ble_device.h"
 #include "log.h"
 #include <thread>
 #include <chrono>
 
-void Device::Connect() {
+void BLEDevice::Connect() {
     const int MAX_ATTEMPTS = 3;
     const int RETRY_DELAY_MS = 1000;
 
@@ -30,7 +30,7 @@ void Device::Connect() {
     }
 }
 
-Device::Device(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
+BLEDevice::BLEDevice(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
                SimpleBLE::BluetoothUUID serv_uuid, SimpleBLE::BluetoothUUID char_uuid)
     : peripheral(std::move(p)), address(std::move(addr)), 
       serv_uuid(std::move(serv_uuid)), char_uuid(std::move(char_uuid)) {
@@ -43,7 +43,7 @@ Device::Device(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
     Connect();
 }
 
-Device::~Device() {
+BLEDevice::~BLEDevice() {
     if (peripheral && peripheral->is_connected()) {
         try {
             peripheral->disconnect();
@@ -54,13 +54,13 @@ Device::~Device() {
     }
 }
 
-bool Device::IsConnected() {
+bool BLEDevice::IsConnected() {
     bool connected = peripheral->is_connected();
     DEBUG_LOG("Device " + address + " connection status: " + (connected ? "connected" : "disconnected"));
     return connected;
 }
 
-void Device::TurnOn() {
+void BLEDevice::TurnOn() {
     try {
         peripheral->write_command(serv_uuid, char_uuid, SimpleBLE::ByteArray::fromHex("7e0704ff00010201ef"));
         SetColor(static_cast<uint8_t>(0), static_cast<uint8_t>(255), static_cast<uint8_t>(255));
@@ -74,12 +74,12 @@ void Device::TurnOn() {
     }
 }
 
-void Device::TurnOff() {
+void BLEDevice::TurnOff() {
     DEBUG_LOG("Turning off device: " + address);
     SetColor(static_cast<uint8_t>(0), static_cast<uint8_t>(0), static_cast<uint8_t>(0));
 }
 
-void Device::SetColor(uint8_t r, uint8_t g, uint8_t b) {
+void BLEDevice::SetColor(uint8_t r, uint8_t g, uint8_t b) {
     char hex[21];
     snprintf(hex, sizeof(hex), "7e070503%02x%02x%02x10ef", r, g, b);
     try {

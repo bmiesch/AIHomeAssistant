@@ -1,11 +1,11 @@
-#include "kernel.h"
+#include "core.h"
 #include "log.h"
 #include <chrono>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
 
-void Kernel::AudioCaptureLoop() {
+void Core::AudioCaptureLoop() {
     while(running) {
         auto buffer = audio_capture->CaptureAudio(1000);
         {
@@ -17,7 +17,7 @@ void Kernel::AudioCaptureLoop() {
     }
 }
 
-void Kernel::AudioProcessingLoop() {
+void Core::AudioProcessingLoop() {
     while(running) {
         std::vector<int16_t> buffer;
         {
@@ -62,7 +62,7 @@ void Kernel::AudioProcessingLoop() {
     }
 }
 
-Kernel::Kernel(const std::string& broker_address, const std::string& client_id) 
+Core::Core(const std::string& broker_address, const std::string& client_id) 
     : mqtt_client(broker_address, client_id),
       mqtt_conn_opts(mqtt::connect_options_builder()
         .keep_alive_interval(std::chrono::seconds(20))
@@ -70,19 +70,19 @@ Kernel::Kernel(const std::string& broker_address, const std::string& client_id)
         .automatic_reconnect(true)
         .finalize()) {
 
-    INFO_LOG("Initializing Kernel with broker: " + broker_address + ", client_id: " + client_id);
+    INFO_LOG("Initializing Core with broker: " + broker_address + ", client_id: " + client_id);
     audio_capture = std::make_unique<AudioCapture>();
     keyword_detector = std::make_unique<KeywordDetector>();
     
     mqtt_client.set_callback(*this);
 }
 
-Kernel::~Kernel() {
-    DEBUG_LOG("Kernel destructor called");
+Core::~Core() {
+    DEBUG_LOG("Core destructor called");
     Stop();
 }
 
-void Kernel::Initialize() {
+void Core::Initialize() {
     try {
         INFO_LOG("Connecting to MQTT broker...");
         mqtt::token_ptr conntok = mqtt_client.connect(mqtt_conn_opts);
@@ -93,12 +93,12 @@ void Kernel::Initialize() {
     }
 }
 
-void Kernel::Run() {
+void Core::Run() {
     running = true;
-    INFO_LOG("Starting Kernel threads");
+    INFO_LOG("Starting Core threads");
 
-    audio_thread = std::thread(&Kernel::AudioCaptureLoop, this);
-    audio_processing_thread = std::thread(&Kernel::AudioProcessingLoop, this);
+    audio_thread = std::thread(&Core::AudioCaptureLoop, this);
+    audio_processing_thread = std::thread(&Core::AudioProcessingLoop, this);
 
     while (running) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -108,8 +108,8 @@ void Kernel::Run() {
     audio_processing_thread.join();
 }   
 
-void Kernel::Stop() {
-    INFO_LOG("Stopping Kernel");
+void Core::Stop() {
+    INFO_LOG("Stopping Core");
     running = false;
     audio_queue_cv.notify_all();
     
@@ -125,7 +125,7 @@ void Kernel::Stop() {
     }
 }
 
-void Kernel::PublishLEDManagerCommand(const std::string& command, const json& params) {
+void Core::PublishLEDManagerCommand(const std::string& command, const json& params) {
     json message;
     message["command"] = command;
     message["params"] = params;
@@ -141,16 +141,16 @@ void Kernel::PublishLEDManagerCommand(const std::string& command, const json& pa
     }
 }
 
-void Kernel::connected(const std::string& cause) {
+void Core::connected(const std::string& cause) {
     INFO_LOG("Connected to MQTT broker: " + cause);
     mqtt_client.subscribe("home/devices/#", 0);
 }
 
-void Kernel::connection_lost(const std::string& cause) {
+void Core::connection_lost(const std::string& cause) {
     WARN_LOG("MQTT connection lost: " + cause);
 }
 
-void Kernel::message_arrived(mqtt::const_message_ptr msg) {
+void Core::message_arrived(mqtt::const_message_ptr msg) {
     std::string topic = msg->get_topic();
     std::string payload = msg->to_string();
 
@@ -160,12 +160,12 @@ void Kernel::message_arrived(mqtt::const_message_ptr msg) {
     }    
 }
 
-void Kernel::HandleServiceStatus(const std::string& topic, const std::string& payload) {
+void Core::HandleServiceStatus(const std::string& topic, const std::string& payload) {
     DEBUG_LOG("Service status update - Topic: " + topic + ", Payload: " + payload);
     // React to service status changes if necessary
 }
 
-void Kernel::delivery_complete(mqtt::delivery_token_ptr token) {
+void Core::delivery_complete(mqtt::delivery_token_ptr token) {
     (void)token;
     DEBUG_LOG("MQTT message delivered");
 }

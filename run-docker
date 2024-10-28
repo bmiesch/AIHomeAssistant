@@ -26,10 +26,10 @@ if [ "$1" == "build" ]; then
 fi
 
 # Start the services
-start_services
+start_services || exit 1
 
 # Recompile the code
-recompile_code
+recompile_code || exit 1
 
 # Copy the binary from docker container to the project root
 cd "${PROJECT_ROOT}/.docker/compile" && docker-compose exec app sh -c "cp /app/build/start_arm64 /app/source/start_arm64"

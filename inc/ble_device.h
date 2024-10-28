@@ -4,7 +4,14 @@
 #include <memory>
 #include <simpleble/SimpleBLE.h>
 
-class Device {
+
+struct BLEDeviceConfig {
+    std::string address;
+    SimpleBLE::BluetoothUUID serv_uuid;
+    SimpleBLE::BluetoothUUID char_uuid;
+};
+
+class BLEDevice {
 private:
     std::unique_ptr<SimpleBLE::Peripheral> peripheral;
     std::string address;
@@ -14,9 +21,9 @@ private:
     void Connect();
 
 public:
-    Device(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
+    BLEDevice(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
            SimpleBLE::BluetoothUUID serv_uuid, SimpleBLE::BluetoothUUID char_uuid);
-    ~Device();
+    ~BLEDevice();
 
     bool IsConnected();
     void TurnOn();
