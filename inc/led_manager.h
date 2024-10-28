@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <mutex>
+#include <atomic>
 #include <simpleble/SimpleBLE.h>
 #include <nlohmann/json.hpp>
 #include <mqtt/async_client.h>
@@ -14,6 +15,7 @@ using json = nlohmann::json;
 
 class LEDManager : public virtual mqtt::callback {
 private:
+    std::atomic<bool> running{true};
     std::vector<BLEDeviceConfig> device_configs;
     std::vector<std::unique_ptr<BLEDevice>> devices;
     std::unique_ptr<SimpleBLE::Adapter> adapter;

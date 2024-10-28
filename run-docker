@@ -32,4 +32,4 @@ start_services || exit 1
 recompile_code || exit 1
 
 # Copy the binary from docker container to the project root
-cd "${PROJECT_ROOT}/.docker/compile" && docker-compose exec app sh -c "cp /app/build/start_arm64 /app/source/start_arm64"
+cd "${PROJECT_ROOT}/.docker/compile" && docker-compose exec app sh -c "cp -f /app/build/start_arm64 /app/source/start_arm64"

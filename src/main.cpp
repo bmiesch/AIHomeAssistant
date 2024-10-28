@@ -55,28 +55,26 @@ int main() {
       led_manager.Initialize();
 
       std::thread core_thread([&core]() {
-         while (should_run) {
-            core.Run();
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-         }
+         core.Run();
       });
 
       std::thread led_manager_thread([&led_manager]() {
-         while (should_run) {
-            led_manager.Run();
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-         }
+         led_manager.Run();
       });
 
-      // Wait for a signal to stop
+      // Wait for shutdown signal
       while(should_run) {
          std::this_thread::sleep_for(std::chrono::seconds(1));
       }
 
-      std::cout << "Stopping core and LED manager...\n";
+      std::cout << "Initiating shutdown sequence...\n";
+      
+      // Stop the components first
+      core.Stop();
+      led_manager.Stop();
 
-      core_thread.join();
-      led_manager_thread.join();
+      if (core_thread.joinable()) core_thread.join();
+      if (led_manager_thread.joinable()) led_manager_thread.join();
 
       g_core = nullptr;
       g_led_manager = nullptr;
