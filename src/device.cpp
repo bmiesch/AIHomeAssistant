@@ -1,13 +1,7 @@
 #include "device.h"
-#include <iostream>
-#include <vector>
+#include "log.h"
 #include <thread>
 #include <chrono>
-
-// Assuming you have these logging macros defined somewhere
-#define INFO_LOG(x) std::cout << "INFO: " << x << std::endl
-#define WARN_LOG(x) std::cout << "WARN: " << x << std::endl
-#define ERROR_LOG(x) std::cerr << "ERROR: " << x << std::endl
 
 void Device::Connect() {
     const int MAX_ATTEMPTS = 3;
@@ -20,14 +14,17 @@ void Device::Connect() {
                 INFO_LOG("Connected to Device: " + address);
                 return;
             }
+            WARN_LOG("Connection attempt " + std::to_string(i) + " succeeded but device reports as disconnected");
         } catch (const std::exception& e) {
             if (i < MAX_ATTEMPTS) {
                 WARN_LOG("Attempt " + std::to_string(i) + " failed to connect to " 
-                            + address + ": " + e.what() + ". Retrying...");
+                        + address + ": " + e.what() + ". Retrying...");
                 std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS));
             } else {
                 ERROR_LOG("All attempts failed to connect to " + address 
-                            + ". Last error: " + e.what());
+                         + ". Last error: " + e.what());
+                throw std::runtime_error("Failed to connect to device after " + 
+                                       std::to_string(MAX_ATTEMPTS) + " attempts");
             }
         }
     }
@@ -35,34 +32,50 @@ void Device::Connect() {
 
 Device::Device(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
                SimpleBLE::BluetoothUUID serv_uuid, SimpleBLE::BluetoothUUID char_uuid)
-    : peripheral(std::move(p)), address(std::move(addr)), serv_uuid(std::move(serv_uuid)), char_uuid(std::move(char_uuid)) {
-    if(!peripheral) throw std::runtime_error("Null peripheral passed to Device constructor");
+    : peripheral(std::move(p)), address(std::move(addr)), 
+      serv_uuid(std::move(serv_uuid)), char_uuid(std::move(char_uuid)) {
+    
+    DEBUG_LOG("Creating device with address: " + address);
+    if(!peripheral) {
+        ERROR_LOG("Null peripheral passed to Device constructor");
+        throw std::runtime_error("Null peripheral passed to Device constructor");
+    }
     Connect();
 }
 
 Device::~Device() {
     if (peripheral && peripheral->is_connected()) {
-        peripheral->disconnect();
+        try {
+            peripheral->disconnect();
+            DEBUG_LOG("Disconnected from device: " + address);
+        } catch (const std::exception& e) {
+            ERROR_LOG("Error disconnecting from device " + address + ": " + e.what());
+        }
     }
 }
 
 bool Device::IsConnected() {
-    return peripheral->is_connected();
+    bool connected = peripheral->is_connected();
+    DEBUG_LOG("Device " + address + " connection status: " + (connected ? "connected" : "disconnected"));
+    return connected;
 }
 
 void Device::TurnOn() {
     try {
         peripheral->write_command(serv_uuid, char_uuid, SimpleBLE::ByteArray::fromHex("7e0704ff00010201ef"));
         SetColor(static_cast<uint8_t>(0), static_cast<uint8_t>(255), static_cast<uint8_t>(255));
-        INFO_LOG("Turned on " + address);
+        INFO_LOG("Turned on device: " + address);
     } catch (const SimpleBLE::Exception::OperationFailed& e) {
-        ERROR_LOG("Failed to send message: " + std::string(e.what()));
+        ERROR_LOG("Failed to turn on device " + address + ": " + e.what());
+        throw;
     } catch (const std::exception& e) {
-        ERROR_LOG("Unexpected error while sending message: " + std::string(e.what()));
+        ERROR_LOG("Unexpected error while turning on device " + address + ": " + e.what());
+        throw;
     }
 }
 
 void Device::TurnOff() {
+    DEBUG_LOG("Turning off device: " + address);
     SetColor(static_cast<uint8_t>(0), static_cast<uint8_t>(0), static_cast<uint8_t>(0));
 }
 
@@ -71,8 +84,12 @@ void Device::SetColor(uint8_t r, uint8_t g, uint8_t b) {
     snprintf(hex, sizeof(hex), "7e070503%02x%02x%02x10ef", r, g, b);
     try {
         peripheral->write_command(serv_uuid, char_uuid, SimpleBLE::ByteArray::fromHex(hex));
-        INFO_LOG("Color set for device " + address);
+        INFO_LOG("Set color (R:" + std::to_string(r) + 
+                 ", G:" + std::to_string(g) + 
+                 ", B:" + std::to_string(b) + 
+                 ") for device: " + address);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to set color for " + address + ": " + e.what());
+        throw;
     }
 }

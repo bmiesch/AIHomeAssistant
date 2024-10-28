@@ -22,6 +22,8 @@
 
 
 # Random
-gRPC
-docker
+MQTT
+docker compose for deployment
+GO - service manager
+rust - web app?
 redis
