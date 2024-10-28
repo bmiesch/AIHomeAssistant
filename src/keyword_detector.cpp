@@ -19,8 +19,6 @@ void KeywordDetector::InitConfig(const std::string& hmm_path, const std::string&
 KeywordDetector::KeywordDetector(const std::string& hmm_path, const std::string& dict_path, const std::string& kws_path)
     : config(ps_config_init(nullptr), ps_config_free),
       ps(nullptr, ps_free) {
-    DEBUG_LOG("Creating KeywordDetector with paths - HMM: " + hmm_path + 
-              ", Dict: " + dict_path + ", KWS: " + kws_path);
     InitConfig(hmm_path, dict_path, kws_path);
     ps.reset(ps_init(config.get()));
     if (!ps) {

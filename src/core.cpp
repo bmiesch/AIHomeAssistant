@@ -13,7 +13,6 @@ void Core::AudioCaptureLoop() {
             audio_queue.push(std::move(buffer));
         }
         audio_queue_cv.notify_one();
-        DEBUG_LOG("Audio captured and queued");
     }
 }
 

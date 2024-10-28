@@ -39,15 +39,17 @@ void LEDManager::Initialize() {
 
 void LEDManager::Run() {
     INFO_LOG("LEDManager running...");
-    while (true) {
+    while (running) {
         std::this_thread::sleep_for(std::chrono::seconds(5));
         PublishStatus();
     }
 }
 
 void LEDManager::Stop() {
+    INFO_LOG("Stopping LEDManager");
+    running = false;
+    
     try {
-        INFO_LOG("Stopping LEDManager...");
         mqtt_client.disconnect()->wait();
         DEBUG_LOG("MQTT client disconnected");
     } catch (const mqtt::exception& e) {
@@ -63,11 +65,11 @@ void LEDManager::InitAdapter() {
         throw std::runtime_error("No Bluetooth adapters found");
     }
     adapter = std::make_unique<SimpleBLE::Adapter>(adapters[0]);
-    // adapter->set_callback_on_scan_start([]() { DEBUG_LOG("Scan started"); });
-    // adapter->set_callback_on_scan_stop([]() { DEBUG_LOG("Scan stopped"); });
-    // adapter->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
-    //     DEBUG_LOG("Found device: " + peripheral.address());
-    // });
+    adapter->set_callback_on_scan_start([]() { DEBUG_LOG("Scan started"); });
+    adapter->set_callback_on_scan_stop([]() { DEBUG_LOG("Scan stopped"); });
+    adapter->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
+        DEBUG_LOG("Found device: " + peripheral.address());
+    });
     INFO_LOG("Bluetooth adapter initialized successfully");
 }
 
@@ -99,7 +101,7 @@ void LEDManager::FindAndInitDevices(std::vector<BLEDeviceConfig>& dc) {
 }
 
 void LEDManager::HandleCommand(const json& command) {
-    std::string action = command["action"];
+    std::string action = command["command"];
     DEBUG_LOG("Handling command: " + action);
     
     if (action == "turn_on") {

@@ -9,10 +9,9 @@ enum class LogLevel {
     ERROR
 };
 
-void log(LogLevel lvl, const std::string& msg);
+void log(LogLevel lvl, const std::string& msg, const char* file, int line);
 
-inline void INFO_LOG(const std::string&msg) {log(LogLevel::INFO, msg);}
-inline void DEBUG_LOG(const std::string&msg) {log(LogLevel::DEBUG, msg);}
-inline void WARN_LOG(const std::string&msg) {log(LogLevel::WARN, msg);}
-inline void ERROR_LOG(const std::string&msg) {log(LogLevel::ERROR, msg);}
-
+#define INFO_LOG(msg) log(LogLevel::INFO, msg, __FILE__, __LINE__)
+#define DEBUG_LOG(msg) log(LogLevel::DEBUG, msg, __FILE__, __LINE__)
+#define WARN_LOG(msg) log(LogLevel::WARN, msg, __FILE__, __LINE__)
+#define ERROR_LOG(msg) log(LogLevel::ERROR, msg, __FILE__, __LINE__)

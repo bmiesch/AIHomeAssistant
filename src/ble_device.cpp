@@ -35,9 +35,7 @@ BLEDevice::BLEDevice(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
     : peripheral(std::move(p)), address(std::move(addr)), 
       serv_uuid(std::move(serv_uuid)), char_uuid(std::move(char_uuid)) {
     
-    DEBUG_LOG("Creating device with address: " + address);
     if(!peripheral) {
-        ERROR_LOG("Null peripheral passed to Device constructor");
         throw std::runtime_error("Null peripheral passed to Device constructor");
     }
     Connect();
