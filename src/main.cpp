@@ -9,18 +9,10 @@
 
 
 std::atomic<bool> should_run(true);
-Core* g_core = nullptr;
-LEDManager* g_led_manager = nullptr;
 
 void signalHandler(int signum) {
     std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
     should_run = false;
-    if (g_core) {
-        g_core->Stop();
-    }
-    if (g_led_manager) {
-        g_led_manager->Stop();
-    }
 }
 
 int main() {
@@ -48,19 +40,11 @@ int main() {
       Core core(broker_address, "core_client");
       LEDManager led_manager(device_configs, broker_address, "led_manager_client");
 
-      g_core = &core;
-      g_led_manager = &led_manager;
-
       core.Initialize();
       led_manager.Initialize();
 
-      std::thread core_thread([&core]() {
-         core.Run();
-      });
-
-      std::thread led_manager_thread([&led_manager]() {
-         led_manager.Run();
-      });
+      std::thread core_thread(&Core::Run, &core);
+      std::thread led_thread(&LEDManager::Run, &led_manager);
 
       // Wait for shutdown signal
       while(should_run) {
@@ -74,12 +58,9 @@ int main() {
       led_manager.Stop();
 
       if (core_thread.joinable()) core_thread.join();
-      if (led_manager_thread.joinable()) led_manager_thread.join();
+      if (led_thread.joinable()) led_thread.join();
 
-      g_core = nullptr;
-      g_led_manager = nullptr;
-
-      std::cout << "Core and LED manager stopped. Exiting.\n";
+      std::cout << "Shutdown complete.\n";
    } catch (const std::exception& e) {
       std::cerr << "Error: " << e.what() << std::endl;
       return 1;

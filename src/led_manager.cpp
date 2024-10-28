@@ -41,8 +41,17 @@ void LEDManager::Run() {
     INFO_LOG("LEDManager running...");
     while (running) {
         std::this_thread::sleep_for(std::chrono::seconds(5));
-        PublishStatus();
+        if (!running) break;
+
+        try {
+            PublishStatus();
+        } catch (const std::exception& e) {
+            if (running) {
+                ERROR_LOG("Error publishing status: " + std::string(e.what()));
+            }
+        }
     }
+    INFO_LOG("LEDManager stopped");
 }
 
 void LEDManager::Stop() {

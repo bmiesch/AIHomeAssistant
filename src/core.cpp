@@ -10,6 +10,12 @@ void Core::AudioCaptureLoop() {
         auto buffer = audio_capture->CaptureAudio(1000);
         {
             std::lock_guard<std::mutex> lock(audio_queue_mutex);
+            if (audio_queue.size() > 5) {  // Keep 10 seconds of audio max
+                WARN_LOG("Audio queue overflow: " + std::to_string(audio_queue.size()) + " buffers");
+                while (audio_queue.size() > 3) {  // Keep last 5 seconds
+                    audio_queue.pop();
+                }
+            }
             audio_queue.push(std::move(buffer));
         }
         audio_queue_cv.notify_one();
@@ -29,13 +35,25 @@ void Core::AudioProcessingLoop() {
 
         if (keyword_detector->DetectKeyword(buffer, true)) {
             INFO_LOG("Keyword detected! Listening for command...");
+
+            // Clear any backlogged audio before starting command collection
+            {
+                std::lock_guard<std::mutex> lock(audio_queue_mutex);
+                std::queue<std::vector<int16_t>> empty;
+                std::swap(audio_queue, empty);
+            }
             
             // Collect audio for 5 seconds (5 buffers of 1000ms each)
             std::vector<int16_t> command_buffer;
             for (int i = 0; i < 5; ++i) {
                 std::unique_lock<std::mutex> lock(audio_queue_mutex);
-                audio_queue_cv.wait(lock, [this] { return !audio_queue.empty() || !running; });
+                audio_queue_cv.wait_for(lock, std::chrono::milliseconds(1100),
+                    [this] { return !audio_queue.empty() || !running; });
                 if (!running) break;
+                if (audio_queue.empty()) {
+                    WARN_LOG("Missed audio buffer during command collection");
+                    continue;
+                }
                 auto next_buffer = std::move(audio_queue.front());
                 audio_queue.pop();
                 command_buffer.insert(command_buffer.end(), next_buffer.begin(), next_buffer.end());
