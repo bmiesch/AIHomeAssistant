@@ -10,9 +10,9 @@ build_images() {
 }
 
 # Function to start the services
-start_services() {
-  echo "Starting services..."
-  cd "${PROJECT_ROOT}/.docker/compile" && docker-compose up -d
+restart_services() {
+  echo "Restarting services..."
+  cd "${PROJECT_ROOT}/.docker/compile" && docker-compose down && docker-compose up -d
 }
 
 recompile_code() {
@@ -26,7 +26,7 @@ if [ "$1" == "build" ]; then
 fi
 
 # Start the services
-start_services || exit 1
+restart_services || exit 1
 
 # Recompile the code
 recompile_code || exit 1

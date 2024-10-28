@@ -1,6 +1,6 @@
-hello /1.0/
-activate /0.7/
-light /0.7/
+hello /0.5/
+activate /0.5/
+light /0.5/
 off /0.7/
 activate light /0.7/
 turn off light /0.7/
