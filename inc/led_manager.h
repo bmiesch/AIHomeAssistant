@@ -45,12 +45,14 @@ private:
     void message_arrived(mqtt::const_message_ptr msg) override;
     void delivery_complete(mqtt::delivery_token_ptr token) override;
 
+    std::thread worker_thread;
+    void Run();
+
 public:
     LEDManager(const std::vector<BLEDeviceConfig>& configs, const std::string& broker_address,
                const std::string& client_id);
     ~LEDManager();
 
     void Initialize();
-    void Run();
     void Stop();
 };

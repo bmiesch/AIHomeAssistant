@@ -34,7 +34,7 @@ BLEDevice::BLEDevice(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
                SimpleBLE::BluetoothUUID serv_uuid, SimpleBLE::BluetoothUUID char_uuid)
     : peripheral(std::move(p)), address(std::move(addr)), 
       serv_uuid(std::move(serv_uuid)), char_uuid(std::move(char_uuid)) {
-    
+        
     if(!peripheral) {
         throw std::runtime_error("Null peripheral passed to Device constructor");
     }

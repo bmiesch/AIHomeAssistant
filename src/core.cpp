@@ -34,21 +34,20 @@ void Core::AudioProcessingLoop() {
         }
 
         if (keyword_detector->DetectKeyword(buffer, true)) {
-            INFO_LOG("Keyword detected! Listening for command...");
-
             // Clear any backlogged audio before starting command collection
             {
                 std::lock_guard<std::mutex> lock(audio_queue_mutex);
                 std::queue<std::vector<int16_t>> empty;
                 std::swap(audio_queue, empty);
             }
+            INFO_LOG("Keyword detected! Listening for command...");
             
             // Collect audio for 5 seconds (5 buffers of 1000ms each)
             std::vector<int16_t> command_buffer;
             for (int i = 0; i < 5; ++i) {
                 std::unique_lock<std::mutex> lock(audio_queue_mutex);
-                audio_queue_cv.wait_for(lock, std::chrono::milliseconds(1100),
-                    [this] { return !audio_queue.empty() || !running; });
+                // Wait for audio data to be available in the queue or for the running flag to be false
+                audio_queue_cv.wait(lock, [this] {return !audio_queue.empty() || !running; });
                 if (!running) break;
                 if (audio_queue.empty()) {
                     WARN_LOG("Missed audio buffer during command collection");
@@ -108,19 +107,27 @@ void Core::Initialize() {
         ERROR_LOG("MQTT connection error: " + std::string(e.what()));
         throw;
     }
+
+    // Create and start the worker thread
+    INFO_LOG("Starting main worker thread");
+    worker_thread = std::thread(&Core::Run, this);
 }
 
 void Core::Run() {
     running = true;
     INFO_LOG("Starting Core threads");
 
+    INFO_LOG("Starting audio capture thread");
     audio_thread = std::thread(&Core::AudioCaptureLoop, this);
+
+    INFO_LOG("Starting audio processing thread");
     audio_processing_thread = std::thread(&Core::AudioProcessingLoop, this);
 
     while (running) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
+    INFO_LOG("Joining audio threads");
     audio_thread.join();
     audio_processing_thread.join();
 }   
@@ -132,6 +139,7 @@ void Core::Stop() {
     
     if (audio_thread.joinable()) audio_thread.join();
     if (audio_processing_thread.joinable()) audio_processing_thread.join();
+    if (worker_thread.joinable()) worker_thread.join();
 
     try {
         mqtt_client.disconnect()->wait();
