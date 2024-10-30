@@ -35,6 +35,10 @@ void LEDManager::Initialize() {
         ERROR_LOG("Error connecting to MQTT broker: " + std::string(e.what()));
         throw;
     }
+
+    // Create and start the worker thread
+    INFO_LOG("Starting main worker thread");
+    worker_thread = std::thread(&LEDManager::Run, this);
 }
 
 void LEDManager::Run() {
@@ -57,6 +61,10 @@ void LEDManager::Run() {
 void LEDManager::Stop() {
     INFO_LOG("Stopping LEDManager");
     running = false;
+    
+    if (worker_thread.joinable()) {
+        worker_thread.join();
+    }
     
     try {
         mqtt_client.disconnect()->wait();
@@ -92,9 +100,8 @@ void LEDManager::FindAndInitDevices(std::vector<BLEDeviceConfig>& dc) {
 
         for (auto& peripheral : peripherals) {
             if (peripheral.address() == config.address) {
-                auto peripheral_ptr = std::make_unique<SimpleBLE::Peripheral>(std::move(peripheral));
                 auto device = std::make_unique<BLEDevice>(
-                    std::move(peripheral_ptr),
+                    std::make_unique<SimpleBLE::Peripheral>(peripheral), // Copy of peripheral object into BLEDevice instance
                     config.address,
                     config.serv_uuid,
                     config.char_uuid);

@@ -41,11 +41,13 @@ private:
     void PublishLEDManagerCommand(const std::string& command, const json& params);
     void HandleServiceStatus(const std::string& topic, const std::string& payload);
 
+    std::thread worker_thread;
+    void Run();
+
 public:
     Core(const std::string& broker_address, const std::string& client_id);
     ~Core();
 
     void Initialize();
-    void Run();
     void Stop();
 };

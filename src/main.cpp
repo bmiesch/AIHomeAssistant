@@ -40,11 +40,9 @@ int main() {
       Core core(broker_address, "core_client");
       LEDManager led_manager(device_configs, broker_address, "led_manager_client");
 
+      // Initialize (this creates and starts their threads)
       core.Initialize();
       led_manager.Initialize();
-
-      std::thread core_thread(&Core::Run, &core);
-      std::thread led_thread(&LEDManager::Run, &led_manager);
 
       // Wait for shutdown signal
       while(should_run) {
@@ -54,11 +52,8 @@ int main() {
       std::cout << "Initiating shutdown sequence...\n";
       
       // Stop the components first
-      core.Stop();
       led_manager.Stop();
-
-      if (core_thread.joinable()) core_thread.join();
-      if (led_thread.joinable()) led_thread.join();
+      core.Stop();
 
       std::cout << "Shutdown complete.\n";
    } catch (const std::exception& e) {
