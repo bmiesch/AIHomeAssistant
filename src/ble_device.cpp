@@ -3,6 +3,29 @@
 #include <thread>
 #include <chrono>
 
+
+BLEDevice::BLEDevice(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
+               SimpleBLE::BluetoothUUID serv_uuid, SimpleBLE::BluetoothUUID char_uuid)
+    : peripheral(std::move(p)), address(std::move(addr)), 
+      serv_uuid(std::move(serv_uuid)), char_uuid(std::move(char_uuid)) {
+        
+    if(!peripheral) {
+        throw std::runtime_error("Null peripheral passed to Device constructor");
+    }
+    Connect();
+}
+
+BLEDevice::~BLEDevice() {
+    if (peripheral && peripheral->is_connected()) {
+        try {
+            peripheral->disconnect();
+            DEBUG_LOG("Disconnected from device: " + address);
+        } catch (const std::exception& e) {
+            ERROR_LOG("Error disconnecting from device " + address + ": " + e.what());
+        }
+    }
+}
+
 void BLEDevice::Connect() {
     const int MAX_ATTEMPTS = 3;
     const int RETRY_DELAY_MS = 1000;
@@ -26,28 +49,6 @@ void BLEDevice::Connect() {
                 throw std::runtime_error("Failed to connect to device after " + 
                                        std::to_string(MAX_ATTEMPTS) + " attempts");
             }
-        }
-    }
-}
-
-BLEDevice::BLEDevice(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
-               SimpleBLE::BluetoothUUID serv_uuid, SimpleBLE::BluetoothUUID char_uuid)
-    : peripheral(std::move(p)), address(std::move(addr)), 
-      serv_uuid(std::move(serv_uuid)), char_uuid(std::move(char_uuid)) {
-        
-    if(!peripheral) {
-        throw std::runtime_error("Null peripheral passed to Device constructor");
-    }
-    Connect();
-}
-
-BLEDevice::~BLEDevice() {
-    if (peripheral && peripheral->is_connected()) {
-        try {
-            peripheral->disconnect();
-            DEBUG_LOG("Disconnected from device: " + address);
-        } catch (const std::exception& e) {
-            ERROR_LOG("Error disconnecting from device " + address + ": " + e.what());
         }
     }
 }
