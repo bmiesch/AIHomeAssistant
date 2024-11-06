@@ -1,6 +1,20 @@
 #include "audio_capture.h"
-#include <iostream>
 #include <stdexcept>
+#include "log.h"
+
+
+AudioCapture::AudioCapture(unsigned int rate, unsigned int chans)
+    : audio_capture_device(nullptr), sample_rate(rate), channels(chans), format(SND_PCM_FORMAT_S16_LE) {
+    INFO_LOG("Initializing audio capture with rate: " + std::to_string(rate) + " Hz, channels: " + std::to_string(chans));
+    InitParams();
+}
+
+AudioCapture::~AudioCapture() {
+    if (audio_capture_device) {
+        snd_pcm_close(audio_capture_device);
+        DEBUG_LOG("Audio capture device closed");
+    }
+}
 
 void AudioCapture::InitParams() {
     int rc;
@@ -8,6 +22,7 @@ void AudioCapture::InitParams() {
     // Open PCM device
     rc = snd_pcm_open(&audio_capture_device, "default", SND_PCM_STREAM_CAPTURE, 0);
     if (rc < 0) {
+        ERROR_LOG("Cannot open audio device: " + std::string(snd_strerror(rc)));
         throw std::runtime_error("Cannot open audio device: " + std::string(snd_strerror(rc)));
     }
 
@@ -17,17 +32,21 @@ void AudioCapture::InitParams() {
 
     // Set parameters
     rc = snd_pcm_hw_params_set_access(audio_capture_device, params, SND_PCM_ACCESS_RW_INTERLEAVED);
-    if (rc < 0) std::cerr << "Cannot set access type: " << snd_strerror(rc) << std::endl;
+    if (rc < 0) ERROR_LOG("Cannot set access type: " + std::string(snd_strerror(rc)));
+    
     rc = snd_pcm_hw_params_set_format(audio_capture_device, params, format);
-    if (rc < 0) std::cerr << "Cannot set sample format: " << snd_strerror(rc) << std::endl;
+    if (rc < 0) ERROR_LOG("Cannot set sample format: " + std::string(snd_strerror(rc)));
+    
     rc = snd_pcm_hw_params_set_channels(audio_capture_device, params, channels);
-    if (rc < 0) std::cerr << "Cannot set channel count: " << snd_strerror(rc) << std::endl;
+    if (rc < 0) ERROR_LOG("Cannot set channel count: " + std::string(snd_strerror(rc)));
+    
     rc = snd_pcm_hw_params_set_rate_near(audio_capture_device, params, &sample_rate, 0);
-    if (rc < 0) std::cerr << "Cannot set sample rate: " << snd_strerror(rc) << std::endl;
+    if (rc < 0) ERROR_LOG("Cannot set sample rate: " + std::string(snd_strerror(rc)));
 
     // Apply parameters
     rc = snd_pcm_hw_params(audio_capture_device, params);
     if (rc < 0) {
+        ERROR_LOG("Cannot set hardware parameters: " + std::string(snd_strerror(rc)));
         throw std::runtime_error("Cannot set hardware parameters: " + std::string(snd_strerror(rc)));
     }
 
@@ -46,27 +65,16 @@ void AudioCapture::PrintCurrentParameters() {
     snd_pcm_hw_params_get_format(params, &format);
     snd_pcm_hw_params_get_channels(params, &channels);
 
-    std::cout << "Buffer size: " << buffer_size << " frames\n"
-              << "Sample rate: " << rate << " Hz\n"
-              << "Format: " << snd_pcm_format_name(format) << "\n"
-              << "Channels: " << channels << "\n";
+    INFO_LOG("Buffer size: " + std::to_string(buffer_size) + " frames");
+    INFO_LOG("Sample rate: " + std::to_string(rate) + " Hz");
+    INFO_LOG("Format: " + std::string(snd_pcm_format_name(format)));
+    INFO_LOG("Channels: " + std::to_string(channels));
 }
 
 void AudioCapture::ResetCaptureDevice() {
     snd_pcm_drop(audio_capture_device);
     snd_pcm_prepare(audio_capture_device);
     snd_pcm_reset(audio_capture_device);
-}
-
-AudioCapture::AudioCapture(unsigned int rate, unsigned int chans)
-    : audio_capture_device(nullptr), sample_rate(rate), channels(chans), format(SND_PCM_FORMAT_S16_LE) {
-    InitParams();
-}
-
-AudioCapture::~AudioCapture() {
-    if (audio_capture_device) {
-        snd_pcm_close(audio_capture_device);
-    }
 }
 
 std::vector<int16_t> AudioCapture::CaptureAudio(unsigned int duration_ms) {
@@ -81,11 +89,11 @@ std::vector<int16_t> AudioCapture::CaptureAudio(unsigned int duration_ms) {
                                             buffer.data() + frames_read * channels, 
                                             frames_to_read - frames_read);
         if (rc == -EPIPE) {
-            std::cerr << "Overrun occurred" << std::endl;
+            WARN_LOG("Overrun occurred");
             snd_pcm_prepare(audio_capture_device);
         } else if (rc < 0) {
-            std::cerr << "Error code: " << rc << std::endl;
-            std::cerr << "Error description: " << snd_strerror(rc) << std::endl;
+            ERROR_LOG("Error code: " + std::to_string(rc));
+            ERROR_LOG("Error description: " + std::string(snd_strerror(rc)));
             throw std::runtime_error("Error from read: " + std::string(snd_strerror(rc)));
         } else {
             frames_read += rc;

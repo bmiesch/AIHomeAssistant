@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 
+
 enum class Command {
     TURN_OFF,
     TURN_ON,

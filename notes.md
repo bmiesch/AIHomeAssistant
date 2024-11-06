@@ -24,3 +24,9 @@ docker build -t my_ble_app .
 docker run -it --name ble_dev -v $(pwd):/app my_ble_app /bin/bash
 Leave container with exit
 docker start -i ble_dev
+
+
+Mosquitto:
+sudo systemctl start mosquitto
+sudo systemctl enable mosquitto
+sudo systemctl status mosquitto
