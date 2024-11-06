@@ -31,9 +31,9 @@ void Core::AudioCaptureLoop() {
         auto buffer = audio_capture->CaptureAudio(1000);
         {
             std::lock_guard<std::mutex> lock(audio_queue_mutex);
-            if (audio_queue.size() > 5) {  // Keep 10 seconds of audio max
+            if (audio_queue.size() > 5) {
                 WARN_LOG("Audio queue overflow: " + std::to_string(audio_queue.size()) + " buffers");
-                while (audio_queue.size() > 3) {  // Keep last 5 seconds
+                while (audio_queue.size() > 3) {
                     audio_queue.pop();
                 }
             }
@@ -167,6 +167,11 @@ void Core::PublishLEDManagerCommand(const std::string& command, const json& para
     }
 }
 
+void Core::HandleServiceStatus(const std::string& topic, const std::string& payload) {
+    DEBUG_LOG("Service status update - Topic: " + topic + ", Payload: " + payload);
+    // React to service status changes if necessary
+}
+
 
 /*
  * MQTT Callback Functions
@@ -193,11 +198,6 @@ void Core::message_arrived(mqtt::const_message_ptr msg) {
     if (topic.find("home/services/") == 0) {
         HandleServiceStatus(topic, payload);
     }    
-}
-
-void Core::HandleServiceStatus(const std::string& topic, const std::string& payload) {
-    DEBUG_LOG("Service status update - Topic: " + topic + ", Payload: " + payload);
-    // React to service status changes if necessary
 }
 
 void Core::delivery_complete(mqtt::delivery_token_ptr token) {
