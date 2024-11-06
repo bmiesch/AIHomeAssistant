@@ -18,15 +18,15 @@ private:
     SimpleBLE::BluetoothUUID serv_uuid;
     SimpleBLE::BluetoothUUID char_uuid;
 
-    void Connect();
-
 public:
     BLEDevice(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,
            SimpleBLE::BluetoothUUID serv_uuid, SimpleBLE::BluetoothUUID char_uuid);
     ~BLEDevice();
 
+    void Connect();
     bool IsConnected();
     void TurnOn();
     void TurnOff();
     void SetColor(uint8_t r, uint8_t g, uint8_t b);
+    std::string GetAddress();
 };

@@ -92,3 +92,7 @@ void BLEDevice::SetColor(uint8_t r, uint8_t g, uint8_t b) {
         throw;
     }
 }
+
+std::string BLEDevice::GetAddress() {
+    return address;
+}
