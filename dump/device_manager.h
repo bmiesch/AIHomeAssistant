@@ -7,6 +7,7 @@
 #include <simpleble/SimpleBLE.h>
 #include "device.h"
 
+
 struct DeviceConfig {
     std::string address;
     SimpleBLE::BluetoothUUID serv_uuid;

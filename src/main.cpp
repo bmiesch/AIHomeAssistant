@@ -1,41 +1,65 @@
-#include "audio_capture.h"
-#include "keyword_detector.h"
+#include "core.h"
+#include "led_manager.h"
 #include <atomic>
 #include <csignal>
 #include <iostream>
 #include <thread>
 #include <chrono>
-#include "kernel.h"
+#include <vector>
+
 
 std::atomic<bool> should_run(true);
-Kernel* g_kernel = nullptr;
 
 void signalHandler(int signum) {
-   std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
-   should_run = false;
-   if (g_kernel) {
-      g_kernel->Stop();
-   }
+    std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
+    should_run = false;
 }
 
 int main() {
-   std::signal(SIGINT, signalHandler);
-   std::signal(SIGTERM, signalHandler);
+    std::signal(SIGINT, signalHandler);
+    std::signal(SIGTERM, signalHandler);
 
-   Kernel kernel;
-   g_kernel = &kernel;
-   
-   kernel.Run();
+   // Default address for Mosquitto MQTT Broker
+   std::string broker_address = "tcp://localhost:1883";
 
-   // Wait for a signal to stop
-   while(should_run) {
-      std::this_thread::sleep_for(std::chrono::seconds(1));
+   // LED configurations
+   std::vector<BLEDeviceConfig> device_configs = {
+      BLEDeviceConfig{
+            "BE:67:00:AC:C8:82",
+            SimpleBLE::BluetoothUUID("0000fff0-0000-1000-8000-00805f9b34fb"),
+            SimpleBLE::BluetoothUUID("0000fff3-0000-1000-8000-00805f9b34fb")
+      },
+      BLEDeviceConfig{
+            "BE:67:00:6A:B5:A6",
+            SimpleBLE::BluetoothUUID("0000fff0-0000-1000-8000-00805f9b34fb"),
+            SimpleBLE::BluetoothUUID("0000fff3-0000-1000-8000-00805f9b34fb")
+      }
+   };
+
+   try {
+      Core core(broker_address, "core_client");
+      LEDManager led_manager(device_configs, broker_address, "led_manager_client");
+
+      // Initialize (this creates and starts their threads)
+      core.Initialize();
+      led_manager.Initialize();
+
+      // Wait for shutdown signal
+      while(should_run) {
+         std::this_thread::sleep_for(std::chrono::seconds(1));
+      }
+
+      std::cout << "Initiating shutdown sequence...\n";
+      
+      // Stop the components first
+      led_manager.Stop();
+      core.Stop();
+
+      std::cout << "Shutdown complete.\n";
+   } catch (const std::exception& e) {
+      std::cerr << "Error: " << e.what() << std::endl;
+      return 1;
    }
 
-   std::cout << "Stopping kernel...\n";
-   kernel.Stop();
-
-   g_kernel = nullptr;
-   std::cout << "Kernel stopped. Exiting.\n";
    return 0;
 }

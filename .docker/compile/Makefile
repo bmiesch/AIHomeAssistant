@@ -7,32 +7,29 @@ CXXFLAGS = -Wall -Wextra -pedantic -std=c++17 -g -O0
 TARGET = start
 CROSS_TARGET = start_arm64
 
-# Source files
-SRCS := $(wildcard src/*.cpp)
-OBJS = $(SRCS:.cpp=.o)
-CROSS_OBJS = $(SRCS:.cpp=.cross.o)
+# Source and build directories
+SRCDIR = /app/source
+SRCS := $(wildcard $(SRCDIR)/src/*.cpp)
+OBJS = $(notdir $(SRCS:.cpp=.o))
+CROSS_OBJS = $(notdir $(SRCS:.cpp=.cross.o))
 
 # Header files directory
-INCLUDES = -Iinc -Isrc
+INCLUDES = -I$(SRCDIR)/inc -I$(SRCDIR)/src
 
-# SimpleBLE library flags
+# Library includes and flags (unchanged)
 SIMPLEBLE_INCLUDE = -I/usr/local/include
 SIMPLEBLE_LIB = -lsimpleble
-
-# D-Bus library flags
 DBUS_LIB = -ldbus-1
-
-# ASLA library flags
 ASLA_INCLUDE = -I/usr/include
 ASLA_LIB = -lasound
-
-# PocketSphinx library flags
 POCKETSPHINX_INCLUDE = -I/usr/local/include/pocketsphinx
 POCKETSPHINX_LIB = -lpocketsphinx
+PAHO_MQTT_INCLUDE = -I/usr/local/include
+PAHO_MQTT_LIB = -lpaho-mqttpp3 -lpaho-mqtt3as
 
-# Flags for SimpleBLE dependencies
-CXXFLAGS += $(SIMPLEBLE_INCLUDE) $(ASLA_INCLUDE) $(POCKETSPHINX_INCLUDE) $(INCLUDES)
-LDFLAGS = -L/usr/local/lib $(SIMPLEBLE_LIB) $(DBUS_LIB) $(ASLA_LIB) $(POCKETSPHINX_LIB) -lpthread
+# Update CXXFLAGS and LDFLAGS
+CXXFLAGS += $(SIMPLEBLE_INCLUDE) $(ASLA_INCLUDE) $(POCKETSPHINX_INCLUDE) $(PAHO_MQTT_INCLUDE) $(INCLUDES)
+LDFLAGS = -L/usr/local/lib $(SIMPLEBLE_LIB) $(DBUS_LIB) $(ASLA_LIB) $(POCKETSPHINX_LIB) $(PAHO_MQTT_LIB) -lpthread
 
 # The default rule
 all: $(TARGET)
@@ -42,7 +39,7 @@ $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
 # Rule to compile source files
-%.o: %.cpp
+%.o: $(SRCDIR)/src/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Cross-compilation rules
@@ -51,7 +48,7 @@ cross: $(CROSS_TARGET)
 $(CROSS_TARGET): $(CROSS_OBJS)
 	$(CROSS_CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
-%.cross.o: %.cpp
+%.cross.o: $(SRCDIR)/src/%.cpp
 	$(CROSS_CXX) $(CXXFLAGS) -c $< -o $@
 
 # Clean up build artifacts
