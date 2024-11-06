@@ -2,6 +2,20 @@
 #include <stdexcept>
 #include "log.h"
 
+
+AudioCapture::AudioCapture(unsigned int rate, unsigned int chans)
+    : audio_capture_device(nullptr), sample_rate(rate), channels(chans), format(SND_PCM_FORMAT_S16_LE) {
+    INFO_LOG("Initializing audio capture with rate: " + std::to_string(rate) + " Hz, channels: " + std::to_string(chans));
+    InitParams();
+}
+
+AudioCapture::~AudioCapture() {
+    if (audio_capture_device) {
+        snd_pcm_close(audio_capture_device);
+        DEBUG_LOG("Audio capture device closed");
+    }
+}
+
 void AudioCapture::InitParams() {
     int rc;
     
@@ -61,19 +75,6 @@ void AudioCapture::ResetCaptureDevice() {
     snd_pcm_drop(audio_capture_device);
     snd_pcm_prepare(audio_capture_device);
     snd_pcm_reset(audio_capture_device);
-}
-
-AudioCapture::AudioCapture(unsigned int rate, unsigned int chans)
-    : audio_capture_device(nullptr), sample_rate(rate), channels(chans), format(SND_PCM_FORMAT_S16_LE) {
-    INFO_LOG("Initializing audio capture with rate: " + std::to_string(rate) + " Hz, channels: " + std::to_string(chans));
-    InitParams();
-}
-
-AudioCapture::~AudioCapture() {
-    if (audio_capture_device) {
-        snd_pcm_close(audio_capture_device);
-        DEBUG_LOG("Audio capture device closed");
-    }
 }
 
 std::vector<int16_t> AudioCapture::CaptureAudio(unsigned int duration_ms) {

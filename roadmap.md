@@ -27,3 +27,6 @@ docker compose for deployment
 GO - service manager
 rust - web app?
 redis
+
+
+# Next

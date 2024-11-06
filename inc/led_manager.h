@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <mutex>
+#include <queue>
 #include <atomic>
 #include <simpleble/SimpleBLE.h>
 #include <nlohmann/json.hpp>
@@ -16,15 +17,33 @@ using json = nlohmann::json;
 class LEDManager : public virtual mqtt::callback {
 private:
     std::atomic<bool> running{true};
+    
     std::vector<BLEDeviceConfig> device_configs;
-    std::vector<std::unique_ptr<BLEDevice>> devices;
     std::unique_ptr<SimpleBLE::Adapter> adapter;
+    
     std::mutex devices_mutex;
+    std::vector<std::unique_ptr<BLEDevice>> devices;
+
+    std::mutex cmd_queue_mutex;
+    std::condition_variable cmd_queue_cv;
+    std::queue<json> cmd_queue;
+
+    using CommandHandler = std::function<void(const json&)>;
+    std::unordered_map<std::string, CommandHandler> command_handlers = {
+        {"turn_on",  [this](const json&) { TurnOnAll(); }},
+        {"turn_off", [this](const json&) { TurnOffAll(); }},
+        {"set_color", [this](const json& payload) { 
+            int r = payload["params"]["r"];
+            int g = payload["params"]["g"];
+            int b = payload["params"]["b"];
+            SetColor(r, g, b);
+        }}
+    };
 
     void InitAdapter();
     void FindAndInitDevices(std::vector<BLEDeviceConfig>& dc);
-    void HandleCommand(const json& command);
     void PublishStatus();
+    void HandleCommand(const json& command);
 
     mqtt::async_client mqtt_client;
     mqtt::connect_options mqtt_conn_opts;

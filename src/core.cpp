@@ -5,6 +5,27 @@
 
 using json = nlohmann::json;
 
+
+Core::Core(const std::string& broker_address, const std::string& client_id) 
+    : mqtt_client(broker_address, client_id),
+      mqtt_conn_opts(mqtt::connect_options_builder()
+        .keep_alive_interval(std::chrono::seconds(20))
+        .clean_session(true)
+        .automatic_reconnect(true)
+        .finalize()) {
+
+    INFO_LOG("Initializing Core with broker: " + broker_address + ", client_id: " + client_id);
+    audio_capture = std::make_unique<AudioCapture>();
+    keyword_detector = std::make_unique<KeywordDetector>();
+    
+    mqtt_client.set_callback(*this);
+}
+
+Core::~Core() {
+    DEBUG_LOG("Core destructor called");
+    Stop();
+}
+
 void Core::AudioCaptureLoop() {
     while(running) {
         auto buffer = audio_capture->CaptureAudio(1000);
@@ -78,26 +99,6 @@ void Core::AudioProcessingLoop() {
     }
 }
 
-Core::Core(const std::string& broker_address, const std::string& client_id) 
-    : mqtt_client(broker_address, client_id),
-      mqtt_conn_opts(mqtt::connect_options_builder()
-        .keep_alive_interval(std::chrono::seconds(20))
-        .clean_session(true)
-        .automatic_reconnect(true)
-        .finalize()) {
-
-    INFO_LOG("Initializing Core with broker: " + broker_address + ", client_id: " + client_id);
-    audio_capture = std::make_unique<AudioCapture>();
-    keyword_detector = std::make_unique<KeywordDetector>();
-    
-    mqtt_client.set_callback(*this);
-}
-
-Core::~Core() {
-    DEBUG_LOG("Core destructor called");
-    Stop();
-}
-
 void Core::Initialize() {
     try {
         INFO_LOG("Connecting to MQTT broker...");
@@ -166,6 +167,15 @@ void Core::PublishLEDManagerCommand(const std::string& command, const json& para
     }
 }
 
+
+/*
+ * MQTT Callback Functions
+ * These functions override the virtual callbacks from mqtt::callback
+ * - connected: Called when connection to broker is established
+ * - connection_lost: Called when connection to broker is lost
+ * - message_arrived: Called when a message is received on a subscribed topic
+ * - delivery_complete: Called when a message publish is completed
+ */
 void Core::connected(const std::string& cause) {
     INFO_LOG("Connected to MQTT broker: " + cause);
     mqtt_client.subscribe("home/devices/#", 0);

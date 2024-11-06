@@ -23,7 +23,6 @@ LEDManager::~LEDManager() {
 
 void LEDManager::Initialize() {
     InitAdapter();
-    FindAndInitDevices(device_configs);
 
     try {
         INFO_LOG("Connecting to MQTT broker...");
@@ -42,16 +41,39 @@ void LEDManager::Initialize() {
 }
 
 void LEDManager::Run() {
+    FindAndInitDevices(device_configs);
     INFO_LOG("LEDManager running...");
-    while (running) {
-        std::this_thread::sleep_for(std::chrono::seconds(5));
-        if (!running) break;
 
-        try {
-            PublishStatus();
-        } catch (const std::exception& e) {
-            if (running) {
-                ERROR_LOG("Error publishing status: " + std::string(e.what()));
+    auto last_status_time = std::chrono::steady_clock::now();
+    const auto status_interval = std::chrono::seconds(5);
+
+    while (running) {
+
+        json command;
+        {
+            std::unique_lock<std::mutex> lock(cmd_queue_mutex);
+            cmd_queue_cv.wait_for(lock, std::chrono::seconds(1),
+                [this] {return !cmd_queue.empty() || !running; });
+            
+            if (!running) break;
+            if (!cmd_queue.empty()) {
+                command = std::move(cmd_queue.front());
+                cmd_queue.pop();
+            }
+        }
+        if (!command.is_null()) {
+            HandleCommand(command);
+        }
+
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_status_time >= status_interval) {
+            try {
+                PublishStatus();
+                last_status_time = now;
+            } catch (const std::exception& e) {
+                if (running) {
+                    ERROR_LOG("Error publishing status: " + std::string(e.what()));
+                }
             }
         }
     }
@@ -116,24 +138,35 @@ void LEDManager::FindAndInitDevices(std::vector<BLEDeviceConfig>& dc) {
     }
 }
 
-void LEDManager::HandleCommand(const json& command) {
-    std::string action = command["command"];
-    DEBUG_LOG("Handling command: " + action);
+void LEDManager::PublishStatus() {
+    json status;
+    status["status"] = "online";
+    status["device_count"] = devices.size();
     
-    if (action == "turn_on") {
-        TurnOnAll();
-    } else if (action == "turn_off") {
-        TurnOffAll();
-    } else if (action == "set_color") {
-        int r = command["params"]["r"];
-        int g = command["params"]["g"];
-        int b = command["params"]["b"];
-        DEBUG_LOG("Setting color (R:" + std::to_string(r) + 
-                 ", G:" + std::to_string(g) + 
-                 ", B:" + std::to_string(b) + ")");
-        SetColor(r, g, b);
-    } else {
-        WARN_LOG("Unknown command received: " + action);
+    try {
+        DEBUG_LOG("Publishing status update");
+        mqtt_client.publish(STATUS_TOPIC, status.dump(), 1, false);
+    } catch (const mqtt::exception& e) {
+        ERROR_LOG("Error publishing status: " + std::string(e.what()));
+    }
+}
+
+/*
+ * HandleCommand and Command Handlers 
+ */
+void LEDManager::HandleCommand(const json& payload) {
+    try {
+        std::string action = payload["command"];
+        DEBUG_LOG("Handling command: " + action);
+        
+        auto handler = command_handlers.find(action);
+        if (handler != command_handlers.end()) {
+            handler->second(payload);
+        } else {
+            WARN_LOG("Unknown command received: " + action);
+        }
+    } catch (const std::exception& e) {
+        ERROR_LOG("Error handling command: " + std::string(e.what()));
     }
 }
 
@@ -163,19 +196,14 @@ void LEDManager::SetColor(int r, int g, int b) {
     }
 }
 
-void LEDManager::PublishStatus() {
-    json status;
-    status["status"] = "online";
-    status["device_count"] = devices.size();
-    
-    try {
-        DEBUG_LOG("Publishing status update");
-        mqtt_client.publish(STATUS_TOPIC, status.dump(), 1, false);
-    } catch (const mqtt::exception& e) {
-        ERROR_LOG("Error publishing status: " + std::string(e.what()));
-    }
-}
-
+/*
+ * MQTT Callback Functions
+ * These functions override the virtual callbacks from mqtt::callback
+ * - connected: Called when connection to broker is established
+ * - connection_lost: Called when connection to broker is lost
+ * - message_arrived: Called when a message is received on a subscribed topic
+ * - delivery_complete: Called when a message publish is completed
+ */
 void LEDManager::connected(const std::string& cause) {
     INFO_LOG("Connected to MQTT broker: " + cause);
     mqtt_client.subscribe(COMMAND_TOPIC, 1);
@@ -189,8 +217,13 @@ void LEDManager::message_arrived(mqtt::const_message_ptr msg) {
     if (msg->get_topic() == COMMAND_TOPIC) {
         try {
             DEBUG_LOG("Received message on command topic");
-            json command = json::parse(msg->get_payload());
-            HandleCommand(command);
+            json payload = json::parse(msg->get_payload());
+            {
+                std::lock_guard<std::mutex> lock(cmd_queue_mutex);
+                cmd_queue.push(payload);
+            }
+            cmd_queue_cv.notify_one();
+
         } catch (const json::parse_error& e) {
             ERROR_LOG("Error parsing command: " + std::string(e.what()));
         }
