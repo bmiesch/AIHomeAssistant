@@ -29,6 +29,7 @@ Core::~Core() {
 void Core::AudioCaptureLoop() {
     while(running) {
         auto buffer = audio_capture->CaptureAudio(1000);
+        if (!running) break;
         {
             std::lock_guard<std::mutex> lock(audio_queue_mutex);
             if (audio_queue.size() > 5) {
@@ -54,7 +55,9 @@ void Core::AudioProcessingLoop() {
             audio_queue.pop();
         }
 
-        if (keyword_detector->DetectKeyword(buffer, true)) {
+        if (running && keyword_detector->DetectKeyword(buffer, true)) {
+            if (!running) break;
+            
             // Clear any backlogged audio before starting command collection
             {
                 std::lock_guard<std::mutex> lock(audio_queue_mutex);
@@ -79,7 +82,9 @@ void Core::AudioProcessingLoop() {
                 command_buffer.insert(command_buffer.end(), next_buffer.begin(), next_buffer.end());
             }
 
+            if (!running) break;
             Command cmd = keyword_detector->DetectCommand(command_buffer, true);
+            if (!running) break;
 
             switch(cmd) {
                 case Command::TURN_ON:
@@ -127,19 +132,24 @@ void Core::Run() {
     while (running) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
-
-    INFO_LOG("Joining audio threads");
-    audio_thread.join();
-    audio_processing_thread.join();
 }   
 
 void Core::Stop() {
     INFO_LOG("Stopping Core");
     running = false;
+
+    // Clear any pending audio data
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex);
+        std::queue<std::vector<int16_t>> empty;
+        std::swap(audio_queue, empty);
+    }
+
+    // Wake up any waiting threads
     audio_queue_cv.notify_all();
     
-    if (audio_thread.joinable()) audio_thread.join();
     if (audio_processing_thread.joinable()) audio_processing_thread.join();
+    if (audio_thread.joinable()) audio_thread.join();
     if (worker_thread.joinable()) worker_thread.join();
 
     try {
