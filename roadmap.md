@@ -30,3 +30,15 @@ redis
 
 
 # Next
+Service Manager - Rust - controlled by the web interface
+  * Deploy the services
+    * Install dependencies on remote device
+    * Cross-compile from mono repo, copy to remote server with rsync, create systemd service
+    * Redeploy is as easy as doing the above steps again
+  * Start Services - systemd
+  * Stop Services - systemd
+  * Monitor Services - MQTT Service
+
+Web Interface - JavaScript/React with API - Rust/WASM Full Stack
+  * Monitoring and Logging
+  * Control Services via MQTT
