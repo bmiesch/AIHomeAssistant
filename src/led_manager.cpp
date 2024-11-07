@@ -83,6 +83,12 @@ void LEDManager::Stop() {
     INFO_LOG("Stopping LEDManager");
     running = false;
     cmd_queue_cv.notify_one();
+
+    // Disconnect all devices
+    for (auto& device : devices) {
+        device->Disconnect();
+    }
+    devices.clear();
     
     if (worker_thread.joinable()) {
         worker_thread.join();
@@ -104,17 +110,13 @@ void LEDManager::InitAdapter() {
         throw std::runtime_error("No Bluetooth adapters found");
     }
     adapter = std::make_unique<SimpleBLE::Adapter>(adapters[0]);
-    adapter->set_callback_on_scan_start([]() { DEBUG_LOG("Scan started"); });
-    adapter->set_callback_on_scan_stop([]() { DEBUG_LOG("Scan stopped"); });
-    adapter->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
-        DEBUG_LOG("Found device: " + peripheral.address());
-    });
     INFO_LOG("Bluetooth adapter initialized successfully");
 }
 
 void LEDManager::FindAndInitDevices(std::vector<BLEDeviceConfig>& dc) {
     adapter->scan_for(5000);
     auto peripherals = adapter->scan_get_results();
+    DEBUG_LOG("Found " + std::to_string(peripherals.size()) + " BLE devices");
 
     for(const auto& config : dc) {
         INFO_LOG("Scanning for device: " + config.address);
@@ -135,7 +137,6 @@ void LEDManager::FindAndInitDevices(std::vector<BLEDeviceConfig>& dc) {
                     break;
                 } catch (const std::exception& e) {
                     ERROR_LOG("Failed to initialize device " + config.address + ": " + e.what());
-                    throw;
                 }
             }
         }
@@ -182,6 +183,7 @@ void LEDManager::TurnOnAll() {
         try {
             if (!device->IsConnected()) device->Connect();
             device->TurnOn();
+            INFO_LOG("Turned on device: " + device->GetAddress());
         } catch (const std::exception& e) {
             ERROR_LOG("Error with device " + device->GetAddress() + ": " + std::string(e.what()));
         }
@@ -194,6 +196,7 @@ void LEDManager::TurnOffAll() {
         try {
             if (!device->IsConnected()) device->Connect();
             device->TurnOff();
+            INFO_LOG("Turned off device: " + device->GetAddress());
         } catch (const std::exception& e) {
             ERROR_LOG("Error with device " + device->GetAddress() + ": " + std::string(e.what()));
         }
@@ -209,6 +212,7 @@ void LEDManager::SetColor(int r, int g, int b) {
         try {
             if (!device->IsConnected()) device->Connect();
             device->SetColor(r, g, b);
+            INFO_LOG("Set color for device: " + device->GetAddress());
         } catch (const std::exception& e) {
             ERROR_LOG("Error with device " + device->GetAddress() + ": " + std::string(e.what()));
         }

@@ -6,6 +6,8 @@
 
 KeywordDetector::KeywordDetector(const std::string& hmm_path, const std::string& dict_path, const std::string& kws_path)
     : config(ps_config_init(nullptr), ps_config_free),
+      kws_config(nullptr, ps_config_free),
+      jsgf_config(nullptr, ps_config_free),
       ps(nullptr, ps_free) {
     InitConfig(hmm_path, dict_path, kws_path);
     ps.reset(ps_init(config.get()));
@@ -20,16 +22,50 @@ void KeywordDetector::InitConfig(const std::string& hmm_path, const std::string&
     DEBUG_LOG("Initializing PocketSphinx configuration");
     if (ps_config_set_str(config.get(), "hmm", hmm_path.c_str()) == nullptr ||
         ps_config_set_str(config.get(), "dict", dict_path.c_str()) == nullptr ||
-        ps_config_set_str(config.get(), "kws", kws_path.c_str()) == nullptr ||
-        ps_config_set_float(config.get(), "kws_threshold", 1e-20) == nullptr ||
         ps_config_set_bool(config.get(), "verbose", true) == nullptr) {
         ERROR_LOG("Failed to set PocketSphinx configuration");
         throw std::runtime_error("Failed to set configuration");
     }
+
+    // Keyword Configuration
+    kws_config.reset(ps_config_init(nullptr));
+    std::string kws_json = R"({
+        "hmm": ")" + hmm_path + R"(",
+        "dict": ")" + dict_path + R"(",
+        "kws": ")" + kws_path + R"(",
+        "kws_threshold": 1e-20
+    })";
+    if (ps_config_parse_json(kws_config.get(), kws_json.c_str()) == nullptr) {
+        ERROR_LOG("Failed to parse KWS configuration");
+        throw std::runtime_error("Failed to parse KWS configuration");
+    }
+
+    // JSGF Grammar Configuration
+    jsgf_config.reset(ps_config_init(nullptr));
+    std::string jsgf_json = R"({
+        "hmm": ")" + hmm_path + R"(",
+        "dict": ")" + dict_path + R"(",
+        "jsgf": "commands.gram"
+    })";
+    if (ps_config_parse_json(jsgf_config.get(), jsgf_json.c_str()) == nullptr) {
+        ERROR_LOG("Failed to parse JSGF configuration");
+        throw std::runtime_error("Failed to parse JSGF configuration");
+    }
+
+    if (!kws_config || !jsgf_config) {
+        ERROR_LOG("Failed to create mode-specific configurations");
+        throw std::runtime_error("Failed to create configurations");
+    }
+
     INFO_LOG("PocketSphinx configuration initialized successfully");
 }
 
 bool KeywordDetector::DetectKeyword(const std::vector<int16_t>& buffer, bool verbose) const {
+    if (ps_reinit(ps.get(), kws_config.get()) < 0) {
+        ERROR_LOG("Failed to switch to keyword spotting mode");
+        throw std::runtime_error("Failed to switch configuration");
+    }
+
     if (ps_start_utt(ps.get()) < 0) {
         ERROR_LOG("Failed to start utterance in DetectKeyword");
         throw std::runtime_error("Failed to start utterance");
@@ -62,6 +98,11 @@ bool KeywordDetector::DetectKeyword(const std::vector<int16_t>& buffer, bool ver
 }
 
 Command KeywordDetector::DetectCommand(const std::vector<int16_t>& buffer, bool verbose) {
+    if (ps_reinit(ps.get(), jsgf_config.get()) < 0) {
+        ERROR_LOG("Failed to switch to JSGF grammar mode");
+        throw std::runtime_error("Failed to switch configuration");
+    }
+
     if (ps_start_utt(ps.get()) < 0) {
         ERROR_LOG("Failed to start utterance in DetectCommand");
         throw std::runtime_error("Failed to start utterance");
@@ -80,16 +121,13 @@ Command KeywordDetector::DetectCommand(const std::vector<int16_t>& buffer, bool 
     const char* hyp = ps_get_hyp(ps.get(), nullptr);
     if (hyp != nullptr) {
         std::string hypothesis(hyp);
-        std::transform(hypothesis.begin(), hypothesis.end(), hypothesis.begin(), ::tolower);
         DEBUG_LOG("Detected command hypothesis: " + hypothesis);
 
         // Check for commands
-        if (hypothesis.find("activate") != std::string::npos &&
-            hypothesis.find("light") != std::string::npos) {
+        if (hypothesis == "turn light on") {
             if (verbose) INFO_LOG("Command detected: TURN_ON");
             return Command::TURN_ON;
-        } else if (hypothesis.find("off") != std::string::npos &&
-                   hypothesis.find("light") != std::string::npos) {
+        } else if (hypothesis == "turn light off") {
             if (verbose) INFO_LOG("Command detected: TURN_OFF");
             return Command::TURN_OFF;
         }

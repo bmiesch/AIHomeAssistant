@@ -25,6 +25,8 @@ public:
 
     void Connect();
     bool IsConnected();
+    void Disconnect();
+    
     void TurnOn();
     void TurnOff();
     void SetColor(uint8_t r, uint8_t g, uint8_t b);

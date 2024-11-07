@@ -46,17 +46,34 @@ void BLEDevice::Connect() {
             } else {
                 ERROR_LOG("All attempts failed to connect to " + address 
                          + ". Last error: " + e.what());
-                throw std::runtime_error("Failed to connect to device after " + 
-                                       std::to_string(MAX_ATTEMPTS) + " attempts");
+                throw;
             }
         }
     }
 }
 
+void BLEDevice::Disconnect() {
+    try {
+        if (!peripheral->is_connected()) {
+            DEBUG_LOG("Device " + address + " already disconnected");
+            return;
+        }
+        peripheral->disconnect();
+        INFO_LOG("Disconnected from device: " + address);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Error disconnecting from device " + address + ": " + e.what());
+    }
+}
+
 bool BLEDevice::IsConnected() {
-    bool connected = peripheral->is_connected();
-    DEBUG_LOG("Device " + address + " connection status: " + (connected ? "connected" : "disconnected"));
-    return connected;
+    try {
+        bool connected = peripheral->is_connected();
+        DEBUG_LOG("Device " + address + " connection status: " + (connected ? "connected" : "disconnected"));
+        return connected;
+    } catch (const std::exception& e) {
+        ERROR_LOG("Error checking connection status for device " + address + ": " + e.what());
+        return false;
+    }
 }
 
 void BLEDevice::TurnOn() {
