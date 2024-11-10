@@ -2,3 +2,10 @@
 bm
 *.cross.o
 start*
+
+# Build artifacts
+**/target/
+**/*.rs.bk
+
+# OS specific files
+.DS_Store
