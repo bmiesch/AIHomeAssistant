@@ -1,0 +1,4 @@
+# System dependencies
+libssl-dev
+nlohmann-json3-dev
+libdbus-1-dev

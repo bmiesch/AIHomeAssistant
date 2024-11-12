@@ -1,3 +1,0 @@
-#JSGF V1.0;
-grammar commands;
-public <command> = (turn light on | turn light off);

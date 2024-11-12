@@ -1,0 +1,4 @@
+# System dependencies
+libasound2-dev
+libssl-dev
+nlohmann-json3-dev

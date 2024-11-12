@@ -1,0 +1,7 @@
+devices:
+  rpi02W:
+    name: "rpi02W"
+    arch: "arm64"
+    ip_address: "192.168.0.148"
+    username: "bmiesch"
+    password: "3511"

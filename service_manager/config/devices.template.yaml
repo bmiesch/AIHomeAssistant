@@ -1,0 +1,7 @@
+devices:
+  rpi02W:
+    name: "rpi02W"
+    arch: "arm64"
+    ip_address: "YOUR_IP_HERE"
+    username: "YOUR_USERNAME"
+    password: "YOUR_PASSWORD"
