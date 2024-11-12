@@ -21,8 +21,19 @@ BASE_DEPS=(
     "pkg-config"
 )
 
+# Check if required arguments are provided
+if [ -z "$SERVICE_NAME" ] || [ -z "$ARCH" ]; then
+    echo "Usage: $0 <service_name> <architecture> [build_type]"
+    echo ""
+    echo "Arguments:"
+    echo "  service_name    Name of the service to build"
+    echo "  architecture    Target architecture. Supported: $(echo "$SUPPORTED_ARCHS" | cut -d: -f1)"
+    echo "  build_type     Optional: Build type (default: release)"
+    exit 1
+fi
+
 if [ -z "${ROOT_DIR}" ]; then
-    ROOT_DIR=$(dirname "$(pwd)")
+    ROOT_DIR=$(pwd)
 fi
 TARGETS_DIR="${ROOT_DIR}/targets/${ARCH}"
 DEPS_FILE="${ROOT_DIR}/services/${SERVICE_NAME}/dependencies.txt"

@@ -4,6 +4,7 @@ use thiserror::Error;
 use ssh2::Session;
 use std::net::TcpStream;
 use std::path::Path;
+use std::fs;
 mod device;
 
 use crate::device::{Device, DeviceRegistry, DeviceError, ROOT_DIR};
@@ -52,6 +53,8 @@ pub enum ServiceManagerError {
     DeviceError(#[from] DeviceError),
     #[error("Service not found: {0}")]
     ServiceNotFound(String),
+    #[error("Template error: {0}")]
+    TemplateError(String),
 }
 
 //------------------------------------------------------------------------------
@@ -113,39 +116,18 @@ impl ServiceManager {
         Ok(())
     }
 
-    const CORE_SERVICE_TEMPLATE: &str = r#"[Unit]
-Description=core
-After=sound.target
-Requires=sound.target
-
-[Service]
-Type=simple
-ExecStart=/opt/services/core
-Restart=always
-User={username}
-Group=audio
-DeviceAllow=char-alsa rw
-CPUSchedulingPolicy=fifo
-CPUSchedulingPriority=99
-
-Environment=HOME=/home/{username}
-Environment=XDG_RUNTIME_DIR=/run/user/1000
-Environment=LANG=en_GB.UTF-8
-Environment=LC_ALL=en_US.UTF-8
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-
-[Install]
-WantedBy=multi-user.target"#;
-
-    fn get_service_template(service_name: &str) -> &'static str {
-        match service_name {
-            "core" => Self::CORE_SERVICE_TEMPLATE,
-            _ => panic!("Unknown service: {}", service_name)
-        }
+    fn read_service_template(service_name: &str) -> Result<String, ServiceManagerError> {
+        let template_path = ROOT_DIR
+            .join("services")
+            .join(service_name)
+            .join(format!("{}.service", service_name));
+        
+        fs::read_to_string(template_path)
+            .map_err(|e| ServiceManagerError::TemplateError(format!("Failed to read template: {}", e)))
     }
 
     fn create_service_file(&self, service: &Service) -> Result<String, ServiceManagerError> {
-        let template = Self::get_service_template(&service.name);
+        let template = Self::read_service_template(&service.name)?;
         Ok(template.replace("{username}", &service.device.config.username))
     }
 }
@@ -347,18 +329,25 @@ fn main() -> Result<(), ServiceManagerError> {
     // Create service manager and load devices from yaml file
     let mut service_manager = ServiceManager::new(true)?;
 
-    // Add example service
-    let core_service = Service {
-        name: "core".to_string(),
+    // let core_service = Service {
+    //     name: "core".to_string(),
+    //     status: ServiceStatus::Created,
+    //     device: service_manager.devices.get_device("rpi02W").unwrap().clone(),
+    // };
+
+    let led_manager_service = Service {
+        name: "led_manager".to_string(),
         status: ServiceStatus::Created,
         device: service_manager.devices.get_device("rpi02W").unwrap().clone(),
     };
     
     // Add service to service manager
-    service_manager.add_service(core_service);
+    // service_manager.add_service(core_service);
+    service_manager.add_service(led_manager_service);
 
     // Deploy service
-    service_manager.deploy_service("core")?;
+    // service_manager.deploy_service("core")?;
+    service_manager.deploy_service("led_manager")?;
 
     // Stop broker before exit
     stop_mqtt_broker()?;

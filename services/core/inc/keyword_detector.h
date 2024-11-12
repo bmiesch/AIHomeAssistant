@@ -54,10 +54,9 @@ private:
 public:
     explicit KeywordDetector(const std::string& hmm_path = "/usr/local/share/pocketsphinx/model/en-us/en-us");
 
-    // Delete copy constructor and assignment operator
-    KeywordDetector(const KeywordDetector&) = delete;
-    KeywordDetector& operator=(const KeywordDetector&) = delete;
-
     bool DetectKeyword(const std::vector<int16_t>& buffer, bool verbose = false) const;
     Command DetectCommand(const std::vector<int16_t>& buffer, bool verbose = false);
+
+    KeywordDetector(const KeywordDetector&) = delete;
+    KeywordDetector& operator=(const KeywordDetector&) = delete;
 };

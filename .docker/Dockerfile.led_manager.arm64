@@ -1,4 +1,4 @@
-FROM arm64v8/debian
+FROM arm64v8/debian:bookworm
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -17,5 +17,6 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /build
 COPY services/led_manager .
 COPY services/common .
-RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
+RUN set -e \
+    && cmake -B build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build

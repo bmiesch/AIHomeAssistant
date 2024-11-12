@@ -126,7 +126,6 @@ void Core::Initialize() {
         throw;
     }
 
-    // Create and start the worker thread
     INFO_LOG("Starting main worker thread");
     worker_thread = std::thread(&Core::Run, this);
 }

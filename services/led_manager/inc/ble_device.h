@@ -31,4 +31,7 @@ public:
     void TurnOff();
     void SetColor(uint8_t r, uint8_t g, uint8_t b);
     std::string GetAddress();
+
+    BLEDevice(const BLEDevice&) = delete;
+    BLEDevice& operator=(const BLEDevice&) = delete;
 };

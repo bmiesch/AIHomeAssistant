@@ -74,4 +74,7 @@ public:
 
     void Initialize();
     void Stop();
+
+    LEDManager(const LEDManager&) = delete;
+    LEDManager& operator=(const LEDManager&) = delete;
 };
