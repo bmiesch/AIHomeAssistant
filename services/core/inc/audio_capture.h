@@ -26,6 +26,8 @@ public:
     AudioCapture(unsigned int rate = 16000, unsigned int chans = 1);
     ~AudioCapture();
 
-    // std::vector<int16_t> CaptureAudio(unsigned int duration_ms, AudioMode mode = AudioMode::STEREO);
     std::vector<int16_t> CaptureAudio(unsigned int duration_ms);
+
+    AudioCapture(const AudioCapture&) = delete;
+    AudioCapture& operator=(const AudioCapture&) = delete;
 };

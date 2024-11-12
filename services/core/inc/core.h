@@ -50,4 +50,7 @@ public:
 
     void Initialize();
     void Stop();
+
+    Core(const Core&) = delete;
+    Core& operator=(const Core&) = delete;
 };
