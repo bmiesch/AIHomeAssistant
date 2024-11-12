@@ -1,0 +1,109 @@
+#!/bin/bash
+set -e
+
+# Arguments
+SERVICE_NAME=$1
+ARCH=$2
+BUILD_TYPE=${3:-Release}
+
+# Define supported architectures with their full Docker image identifiers
+# Use a simpler array format for better compatibility
+SUPPORTED_ARCHS="arm64:arm64v8/debian:bookworm"
+
+# Define base build dependencies that are always needed
+BASE_DEPS=(
+    "crossbuild-essential-arm64"
+    "ccache"
+    "g++"
+    "make"
+    "git"
+    "cmake"
+    "pkg-config"
+)
+
+if [ -z "${ROOT_DIR}" ]; then
+    ROOT_DIR=$(dirname "$(pwd)")
+fi
+TARGETS_DIR="${ROOT_DIR}/targets/${ARCH}"
+DEPS_FILE="${ROOT_DIR}/services/${SERVICE_NAME}/dependencies.txt"
+
+# Validate architecture
+VALID_ARCH=0
+
+# Get the Docker image for the given architecture
+for arch_def in $SUPPORTED_ARCHS; do
+    ARCH_NAME=${arch_def%%:*}
+    if [ "${ARCH_NAME}" = "$ARCH" ]; then
+        DOCKER_IMAGE=${arch_def#*:}
+        VALID_ARCH=1
+        break
+    fi
+done
+
+if [ $VALID_ARCH -eq 0 ]; then
+    echo "Error: Unsupported architecture '${ARCH}'"
+    echo "Supported architectures: $(echo "$SUPPORTED_ARCHS" | cut -d: -f1)"
+    exit 1
+fi
+
+if [ -z "$SERVICE_NAME" ] || [ -z "$ARCH" ]; then
+    echo "Usage: $0 <service_name> <architecture> [build_type]"
+    exit 1
+fi
+
+if [ ! -f "$DEPS_FILE" ]; then
+    echo "Dependencies file not found: $DEPS_FILE"
+    exit 1
+fi
+
+# Create Dockerfile for this specific build
+DOCKER_FILE="${ROOT_DIR}/.docker/Dockerfile.${SERVICE_NAME}.${ARCH}"
+cat > "${DOCKER_FILE}" << EOF
+FROM ${DOCKER_IMAGE}
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+EOF
+
+# Add base dependencies to Dockerfile
+for dep in "${BASE_DEPS[@]}"; do
+    echo "    $dep \\" >> "$DOCKER_FILE"
+done
+
+# Add service-specific dependencies to Dockerfile
+grep -v '^#' "$DEPS_FILE" | while read -r dep; do
+    if [ ! -z "$dep" ]; then
+        echo "    $dep \\" >> "$DOCKER_FILE"
+    fi
+done
+
+echo "    && rm -rf /var/lib/apt/lists/*" >> "$DOCKER_FILE"
+
+# Add the service source and build it
+echo "# Build the service" >> "$DOCKER_FILE"
+echo "WORKDIR /build" >> "$DOCKER_FILE"
+echo "COPY services/${SERVICE_NAME} ." >> "$DOCKER_FILE"
+echo "COPY services/common ." >> "$DOCKER_FILE"
+
+echo "RUN set -e \\" >> "$DOCKER_FILE"
+echo "    && cmake -B build -DCMAKE_BUILD_TYPE=$BUILD_TYPE \\" >> "$DOCKER_FILE"
+echo "    && cmake --build build" >> "$DOCKER_FILE"
+
+# Build the image and run the container
+if ! docker build -t "${SERVICE_NAME}-${ARCH}" -f "$DOCKER_FILE" .; then
+    echo "Docker build failed!"
+    exit 1
+fi
+
+# Generate a unique temporary container name
+TEMP_CONTAINER="${SERVICE_NAME}-${ARCH}-container"
+
+# Remove existing container if it exists
+docker rm "$TEMP_CONTAINER" 2>/dev/null || true
+
+# Copy the built binary out
+docker create --name "$TEMP_CONTAINER" "${SERVICE_NAME}-${ARCH}"
+docker cp "${TEMP_CONTAINER}:/build/build/${SERVICE_NAME}_service" "${TARGETS_DIR}/"
+docker rm "$TEMP_CONTAINER"
+
+echo "Build complete! Binary is in target/${ARCH}/${SERVICE_NAME}"

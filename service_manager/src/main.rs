@@ -1,28 +1,28 @@
 use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
-use std::env;
 use ssh2::Session;
 use std::net::TcpStream;
-use std::io::{Error, ErrorKind};
 use std::path::Path;
-use std::io::Write;
+mod device;
+
+use crate::device::{Device, DeviceRegistry, DeviceError, ROOT_DIR};
+use paho_mqtt::{Error as MqttError, AsyncClient, CreateOptionsBuilder, ConnectOptionsBuilder};
+use ssh2::Error as Ssh2Error;
+use std::{
+    io::{self, Write},
+    env,
+    process::Command,
+};
 
 //------------------------------------------------------------------------------
 // Type Definitions
 //------------------------------------------------------------------------------
 
 #[derive(Debug)]
-struct Device {
-    name: String,
-    ip_address: String,
-    username: String,
-    password: String,  // TODO: Consider using a more secure type
-}
-
-#[derive(Debug)]
 enum ServiceStatus {
     Created,
+    Deployed,
     Running,
     Stopped,
 }
@@ -40,12 +40,18 @@ struct Service {
 
 #[derive(Debug, Error)]
 pub enum ServiceManagerError {
-    #[error("Error creating MQTT client: {0}")]
-    MqttCreationError(String),
-    #[error("Error connecting to MQTT broker: {0}")]
-    MqttConnectionError(String),
-    #[error("Error with MQTT broker service: {0}")]
-    MqttBrokerError(String),
+    #[error("MQTT error: {0}")]
+    MqttError(#[from] MqttError),
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("SSH2 error: {0}")]
+    Ssh2Error(#[from] Ssh2Error),
+    #[error("Deployment error: {0}")]
+    DeploymentError(String),
+    #[error("Error loading devices: {0}")]
+    DeviceError(#[from] DeviceError),
+    #[error("Service not found: {0}")]
+    ServiceNotFound(String),
 }
 
 //------------------------------------------------------------------------------
@@ -56,48 +62,108 @@ pub enum ServiceManagerError {
 struct ServiceManager {
     services: HashMap<String, Service>,
     mqtt_client: paho_mqtt::AsyncClient,
+    devices: DeviceRegistry,
 }
 
-// MQTT-related implementations
+// MQTT Implementations
 impl ServiceManager {
-    /// Creates a new ServiceManager instance with MQTT connection
-    pub fn new() -> Result<Self, ServiceManagerError> {
-        let client = Self::create_mqtt_client()?;
-        Self::connect_mqtt_client(&client)?;
-        
-        Ok(Self {
-            services: HashMap::new(),
-            mqtt_client: client,
-        })
-    }
-
-    fn create_mqtt_client() -> Result<paho_mqtt::AsyncClient, ServiceManagerError> {
-        let create_opts = paho_mqtt::CreateOptionsBuilder::new()
+    fn create_mqtt_client() -> Result<AsyncClient, ServiceManagerError> {
+        let create_opts = CreateOptionsBuilder::new()
             .server_uri("tcp://localhost:1883")
             .client_id("service_manager")
             .finalize();
             
-        paho_mqtt::AsyncClient::new(create_opts)
-            .map_err(|e| ServiceManagerError::MqttCreationError(e.to_string()))
+        Ok(AsyncClient::new(create_opts)?)
     }
 
-    fn connect_mqtt_client(client: &paho_mqtt::AsyncClient) -> Result<(), ServiceManagerError> {
-        let conn_opts = paho_mqtt::ConnectOptionsBuilder::new()
+    fn connect_mqtt_client(client: &AsyncClient) -> Result<(), ServiceManagerError> {
+        let conn_opts = ConnectOptionsBuilder::new()
             .keep_alive_interval(Duration::from_secs(20))
             .clean_session(true)
-            .connect_timeout(Duration::from_secs(5))
-            .automatic_reconnect(Duration::from_secs(1), Duration::from_secs(60))
             .finalize();
             
-        client.connect(conn_opts)
-            .wait()
-            .map(|_| ())
-            .map_err(|e| ServiceManagerError::MqttConnectionError(e.to_string()))
+        client.connect(conn_opts).wait()?;
+        Ok(())
     }
 }
 
-// Service management implementations
+// Service Manager Helper Functions
 impl ServiceManager {
+    fn connect_ssh(device: &Device) -> Result<Session, ServiceManagerError> {
+        let tcp = TcpStream::connect(&format!("{}:22", device.config.ip_address))?;
+        let mut ssh = Session::new()?;
+        ssh.set_tcp_stream(tcp);
+        ssh.handshake()?;
+        ssh.userauth_password(&device.config.username, &device.config.password)?;
+        Ok(ssh)
+    }
+
+    fn execute_ssh_command(ssh: &Session, cmd: &str) -> Result<(), ServiceManagerError> {
+        let mut channel = ssh.channel_session()?;
+        channel.exec(cmd)?;
+        channel.close()?;
+
+        let exit_status = channel.exit_status()?;
+        if exit_status != 0 {
+            return Err(ServiceManagerError::DeploymentError(
+                format!("Command failed with status {}: {}", exit_status, cmd)
+            ));
+        }
+        
+        Ok(())
+    }
+
+    const CORE_SERVICE_TEMPLATE: &str = r#"[Unit]
+Description=core
+After=sound.target
+Requires=sound.target
+
+[Service]
+Type=simple
+ExecStart=/opt/services/core
+Restart=always
+User={username}
+Group=audio
+DeviceAllow=char-alsa rw
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=99
+
+Environment=HOME=/home/{username}
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=LANG=en_GB.UTF-8
+Environment=LC_ALL=en_US.UTF-8
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+
+[Install]
+WantedBy=multi-user.target"#;
+
+    fn get_service_template(service_name: &str) -> &'static str {
+        match service_name {
+            "core" => Self::CORE_SERVICE_TEMPLATE,
+            _ => panic!("Unknown service: {}", service_name)
+        }
+    }
+
+    fn create_service_file(&self, service: &Service) -> Result<String, ServiceManagerError> {
+        let template = Self::get_service_template(&service.name);
+        Ok(template.replace("{username}", &service.device.config.username))
+    }
+}
+
+// Service Manager Implementations
+impl ServiceManager {
+    /// Creates a new ServiceManager instance with MQTT connection
+    pub fn new(load_devices: bool) -> Result<Self, ServiceManagerError> {
+        let client = Self::create_mqtt_client()?;
+        Self::connect_mqtt_client(&client)?;
+            
+        Ok(Self {
+            services: HashMap::new(),
+            mqtt_client: client,
+            devices: DeviceRegistry::new(load_devices)?,
+        })
+    }
+
     /// Adds a new service to the manager
     fn add_service(&mut self, service: Service) {
         self.services.insert(service.name.clone(), service);
@@ -114,88 +180,92 @@ impl ServiceManager {
     /// - Install dependencies
     /// - Compile binary and copy to remote device  
     /// - Create systemd service
-    fn deploy_service(&self, service: &Service) -> Result<(), std::io::Error> {
-        println!("Deploying service: {}", service.name);
+    fn deploy_service(&self, service_name: &str) -> Result<(), ServiceManagerError> {
+        let service = self.services.get(service_name)
+            .ok_or_else(|| ServiceManagerError::ServiceNotFound(
+                service_name.to_string()
+            ))?;
+
+        println!("Deploying service: {}", service_name);
     
-        // Step 1: Cross-compile using our existing Dockerfile
         println!("Cross-compiling service...");
-        let status = std::process::Command::new("docker")
+        let script_path = ROOT_DIR.join("cross-compile");
+        let status = std::process::Command::new("bash")
+            .current_dir(&*ROOT_DIR)
+            .arg(script_path)
             .args([
-                "build",
-                "--build-arg", &format!("SERVICE_NAME={}", service.name),
-                "-t", "service-compiler",
-                "-f", ".docker/compile/Dockerfile",
-                "."
+                &service.name,
+                &service.device.config.arch,
             ])
-            .status()?;
-    
+            .env("ROOT_DIR", ROOT_DIR.to_str().unwrap())
+            .status()
+            .map_err(|e| ServiceManagerError::DeploymentError(e.to_string()))?;
+
         if !status.success() {
-            return Err(Error::new(ErrorKind::Other, "Cross-compilation failed"));
+            return Err(ServiceManagerError::DeploymentError(
+                format!("Cross-compilation failed with exit code: {}", status.code().unwrap_or(-1))
+            ));
         }
     
         // Step 2: Connect to remote device
-        let tcp = TcpStream::connect(&format!("{}:22", service.device.ip_address))?;
-        let mut ssh = Session::new().map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-        ssh.set_tcp_stream(tcp);
-        ssh.handshake()?;
-        ssh.userauth_password(&service.device.username, &service.device.password)?;
-    
-        // Helper function for remote commands
-        let execute = |cmd: &str| -> Result<(), std::io::Error> {
-            let mut channel = ssh.channel_session()?;
-            channel.exec(cmd)?;
-            channel.wait_close()?;
-            if channel.exit_status()? != 0 {
-                return Err(Error::new(ErrorKind::Other, format!("Command failed: {}", cmd)));
-            }
-            Ok(())
-        };
+        let ssh = Self::connect_ssh(&service.device)?;
     
         // Step 3: Create service directory on remote device
-        execute("sudo mkdir -p /opt/services")?;
+        Self::execute_ssh_command(&ssh, "sudo mkdir -p /opt/services")?;
+        Self::execute_ssh_command(&ssh, &format!("sudo chown {} /opt/services", service.device.config.username))?;
     
         // Step 4: Copy the binary to remote device
-        let binary_path = format!("target/release/{}", service.name);
+        let binary_path = ROOT_DIR.join("targets")
+            .join(&service.device.config.arch)
+            .join(format!("{}_service", service.name))
+            .to_string_lossy()
+            .to_string();
         let remote_path = format!("/opt/services/{}", service.name);
-        
-        let mut channel = ssh.scp_send(
-            Path::new(&remote_path),  // Convert to Path
-            0o755,
-            std::fs::metadata(&binary_path)?.len(),
-            None
-        )?;
-        
-        let binary_data = std::fs::read(&binary_path)?;
-        channel.write_all(&binary_data)?;  // Use write_all instead of write
-        channel.send_eof()?;
-        channel.wait_eof()?;
-        channel.close()?;
+
+        // Verify binary exists locally
+        if !std::path::Path::new(&binary_path).exists() {
+            return Err(ServiceManagerError::DeploymentError(
+                format!("Binary not found at: {}", binary_path)
+            ));
+        }
+
+        // Copy file using scp command
+        let status = Command::new("sshpass")
+            .arg("-p")
+            .arg(&service.device.config.password)
+            .arg("scp")
+            .arg(&binary_path)
+            .arg(format!("{}@{}:{}", 
+                service.device.config.username,
+                service.device.config.ip_address,
+                remote_path
+            ))
+            .status()?;
+
+        if !status.success() {
+            return Err(ServiceManagerError::DeploymentError(
+                "Failed to copy binary to remote device".to_string()
+            ));
+        }
+
+        // Set executable permissions
+        Self::execute_ssh_command(&ssh, &format!("chmod 755 {}", remote_path))?;
+            
+        // Verify the file exists on remote
+        Self::execute_ssh_command(&ssh, &format!("test -f {}", remote_path))?;
     
         // Step 5: Create systemd service file
-        let service_content = format!(
-            r#"[Unit]
-    Description={}
-    
-    [Service]
-    ExecStart=/opt/services/{}
-    Restart=always
-    User={}
-    
-    [Install]
-    WantedBy=multi-user.target"#,
-            service.name,
-            service.name,
-            service.device.username
-        );
+        let service_content = self.create_service_file(service)?;
     
         // Step 6: Install and start the service
-        execute(&format!(
+        Self::execute_ssh_command(&ssh, &format!(
             "echo '{}' | sudo tee /etc/systemd/system/{}.service",
             service_content, service.name
         ))?;
-        execute("sudo systemctl daemon-reload")?;
-        execute(&format!("sudo systemctl enable {}", service.name))?;
-        execute(&format!("sudo systemctl start {}", service.name))?;
+        
+        Self::execute_ssh_command(&ssh, "sudo systemctl daemon-reload")?;
+        Self::execute_ssh_command(&ssh, &format!("sudo systemctl enable {}", service.name))?;
+        Self::execute_ssh_command(&ssh, &format!("sudo systemctl start {}", service.name))?;
     
         println!("Service {} deployed successfully", service.name);
         Ok(())
@@ -217,22 +287,21 @@ impl ServiceManager {
 //------------------------------------------------------------------------------
 // MQTT Broker
 //------------------------------------------------------------------------------
-fn start_mqtt_broker() -> Result<(), ServiceManagerError> {
+fn start_mqtt_broker() -> Result<(), io::Error> {
     match env::consts::OS {
         "macos" => {
-            std::process::Command::new("brew")
+            Command::new("brew")
                 .args(["services", "start", "mosquitto"])
-                .status()
-                .map_err(|e| ServiceManagerError::MqttBrokerError(e.to_string()))?;
+                .status()?;
         }
         "linux" => {
-            std::process::Command::new("sudo")
+            Command::new("sudo")
                 .args(["systemctl", "start", "mosquitto"])
-                .status()
-                .map_err(|e| ServiceManagerError::MqttBrokerError(e.to_string()))?;
+                .status()?;
         }
         os => {
-            return Err(ServiceManagerError::MqttBrokerError(
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
                 format!("Unsupported operating system: {}", os)
             ));
         }
@@ -240,22 +309,21 @@ fn start_mqtt_broker() -> Result<(), ServiceManagerError> {
     Ok(())
 }
 
-fn stop_mqtt_broker() -> Result<(), ServiceManagerError> {
+fn stop_mqtt_broker() -> Result<(), io::Error> {
     match env::consts::OS {
         "macos" => {
-            std::process::Command::new("brew")
+            Command::new("brew")
                 .args(["services", "stop", "mosquitto"])
-                .status()
-                .map_err(|e| ServiceManagerError::MqttBrokerError(e.to_string()))?;
+                .status()?;
         }
         "linux" => {
-            std::process::Command::new("sudo")
+            Command::new("sudo")
                 .args(["systemctl", "stop", "mosquitto"])
-                .status()
-                .map_err(|e| ServiceManagerError::MqttBrokerError(e.to_string()))?;
+                .status()?;
         }
         os => {
-            return Err(ServiceManagerError::MqttBrokerError(
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
                 format!("Unsupported operating system: {}", os)
             ));
         }
@@ -276,20 +344,21 @@ fn main() -> Result<(), ServiceManagerError> {
     println!("Waiting for MQTT broker to start...");
     std::thread::sleep(Duration::from_secs(2));
 
-    // Create service manager
-    let mut service_manager = ServiceManager::new()?;
+    // Create service manager and load devices from yaml file
+    let mut service_manager = ServiceManager::new(true)?;
 
     // Add example service
-    service_manager.add_service(Service {
+    let core_service = Service {
         name: "core".to_string(),
         status: ServiceStatus::Created,
-        device: Device {
-            name: "rpi02W".to_string(),
-            ip_address: "192.168.0.148".to_string(),
-            username: "bmiesch".to_string(),
-            password: "".to_string(),
-        },
-    });
+        device: service_manager.devices.get_device("rpi02W").unwrap().clone(),
+    };
+    
+    // Add service to service manager
+    service_manager.add_service(core_service);
+
+    // Deploy service
+    service_manager.deploy_service("core")?;
 
     // Stop broker before exit
     stop_mqtt_broker()?;

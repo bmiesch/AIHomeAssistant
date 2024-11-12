@@ -1,0 +1,21 @@
+FROM arm64v8/debian
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    crossbuild-essential-arm64 \
+    ccache \
+    g++ \
+    make \
+    git \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    nlohmann-json3-dev \
+    libdbus-1-dev \
+    && rm -rf /var/lib/apt/lists/*
+# Build the service
+WORKDIR /build
+COPY services/led_manager .
+COPY services/common .
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build
