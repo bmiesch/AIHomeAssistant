@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io;
-use thiserror::Error;
 use std::{env, path::{Path, PathBuf}};
 use once_cell::sync::Lazy;
+use crate::error::*;
 
 pub static ROOT_DIR: Lazy<PathBuf> = Lazy::new(|| {
     PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string()))
@@ -11,16 +10,6 @@ pub static ROOT_DIR: Lazy<PathBuf> = Lazy::new(|| {
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf()
 });
-
-#[derive(Debug, Error)]
-pub enum DeviceError {
-    #[error("Error loading devices: {0}")]
-    IoError(#[from] io::Error),
-    #[error("Error loading devices: {0}")]
-    YamlError(#[from] serde_yaml::Error),
-    #[error("Device not found: {0}")]
-    DeviceNotFound(String),
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Device {

@@ -1,4 +1,5 @@
 mod device;
+mod error;
 mod service;
 mod api;
 
@@ -6,9 +7,10 @@ use service::ServiceManager;
 use std::env;
 use std::process::Command;
 use std::io;
+use tracing_subscriber;
 
 //------------------------------------------------------------------------------
-// MQTT Broker
+// MQTT Broker default: port 1883
 //------------------------------------------------------------------------------
 fn start_mqtt_broker() -> Result<(), io::Error> {
     match env::consts::OS {
@@ -56,21 +58,28 @@ fn stop_mqtt_broker() -> Result<(), io::Error> {
 
 #[tokio::main]
 async fn main() {
+
+    tracing_subscriber::fmt()
+        .with_target(false)      // Don't include the target (module path)
+        .with_thread_ids(true)   // Include thread IDs for async debugging
+        .with_level(true)        // Include log level (INFO, ERROR, etc)
+        .with_file(true)         // Include file name
+        .with_line_number(true)  // Include line number
+        .pretty()                // Use pretty formatting (more readable)
+        .init();
+
     start_mqtt_broker().unwrap();
 
     // Your existing ServiceManager initialization
     let service_manager = ServiceManager::new(true)
         .expect("Failed to initialize service manager");
-
-    // Add API server
-    let app = api::create_router(service_manager);
     
     println!("Starting API server on http://127.0.0.1:3000");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
     
-    axum::serve(listener, app)
+    axum::serve(listener, api::create_router(service_manager))
         .await
         .unwrap();
 
