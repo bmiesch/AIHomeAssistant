@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::time::Duration;
-use thiserror::Error;
 use ssh2::Session;
 use std::net::TcpStream;
 use std::fs;
-use crate::device::{Device, DeviceRegistry, DeviceError, ROOT_DIR};
-use paho_mqtt::{Error as MqttError, AsyncClient, CreateOptionsBuilder, ConnectOptionsBuilder};
-use ssh2::Error as Ssh2Error;
+use crate::device::{Device, DeviceRegistry, ROOT_DIR};
+use paho_mqtt::{AsyncClient, CreateOptionsBuilder, ConnectOptionsBuilder};
 use std::process::Command;
 use serde::Serialize;
+use crate::error::*;
+
 //------------------------------------------------------------------------------
 // Type Definitions
 //------------------------------------------------------------------------------
@@ -26,38 +26,6 @@ pub struct Service {
     pub name: String,
     pub status: ServiceStatus,
     pub device: Device,
-}
-
-//------------------------------------------------------------------------------
-// Error Handling
-//------------------------------------------------------------------------------
-
-#[derive(Debug, Error)]
-pub enum ServiceError {
-    #[error("Service not found: {0}")]
-    ServiceNotFound(String),
-    #[error("Service already exists: {0}")]
-    ServiceAlreadyExists(String),
-    #[error("Service status error: {0}")]
-    ServiceStatusError(String),
-}
-
-#[derive(Debug, Error)]
-pub enum ServiceManagerError {
-    #[error("MQTT error: {0}")]
-    MqttError(#[from] MqttError),
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-    #[error("SSH2 error: {0}")]
-    Ssh2Error(#[from] Ssh2Error),
-    #[error("Deployment error: {0}")]
-    DeploymentError(String),
-    #[error("Error loading devices: {0}")]
-    DeviceError(#[from] DeviceError),
-    #[error("Template error: {0}")]
-    TemplateError(String),
-    #[error("Service error: {0}")]
-    ServiceError(#[from] ServiceError),
 }
 
 //------------------------------------------------------------------------------
@@ -90,6 +58,21 @@ impl ServiceManager {
             
         client.connect(conn_opts).wait()?;
         Ok(())
+    }
+
+    async fn subscribe_to_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
+        let subscribe_token = self.mqtt_client.subscribe(service_name, 1);
+        
+        match subscribe_token.wait() {
+            Ok(_) => {
+                println!("Successfully subscribed to service: {}", service_name);
+                Ok(())
+            },
+            Err(e) => Err(ServiceManagerError::MqttSubscriptionError(format!(
+                "MQTT subscription failed for service '{}': {:?}",
+                service_name, e
+            )))
+        }
     }
 }
 
@@ -148,8 +131,8 @@ impl ServiceManager {
         })
     }
 
+    /// Creates a new service
     pub fn create_service(&mut self, service_name: String, device_name: String) -> Result<(), ServiceManagerError> {
-        // Check if service already exists
         if self.services.contains_key(&service_name) {
             return Err(ServiceManagerError::ServiceError(
                 ServiceError::ServiceAlreadyExists(service_name)
@@ -177,7 +160,7 @@ impl ServiceManager {
     }
 
     /// Deploy a service to a remote device
-    pub fn deploy_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
+    pub async fn deploy_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
         let service = self.get_service_mut(service_name)?;
 
         println!("Deploying service: {}", service_name);
@@ -267,7 +250,7 @@ impl ServiceManager {
     }
 
     /// Start a service on a remote device by starting its systemd service
-    pub fn start_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
+    pub async fn start_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
         let service = self.get_service_mut(service_name)?;
 
         // Check if service is already running
@@ -283,11 +266,14 @@ impl ServiceManager {
         Self::execute_ssh_command(&ssh, &format!("sudo systemctl start {}", service.name))?;
         println!("Service {} started successfully", service.name);
         service.status = ServiceStatus::Running;
+
+        // Subscribe to service topic
+        self.subscribe_to_service(service_name).await?;
         Ok(())
     }
 
     /// Stop a service on a remote device by stopping its systemd service
-    pub fn stop_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
+    pub async fn stop_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
         let service = self.get_service_mut(service_name)?;
 
         // Check if service is already stopped

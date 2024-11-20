@@ -1,0 +1,13 @@
+[package]
+name = "service-manager-frontend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+leptos = { version = "0.5", features = ["csr"] }
+serde = { version = "1.0", features = ["derive"] }
+reqwest = { version = "0.11", features = ["json"] }
+futures = "0.3"
+
+# Optionally share types with backend
+service_manager = { path = ".." }
