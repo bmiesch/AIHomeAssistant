@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{get, post, delete},
     extract::{State, Path},
     Json,
 };
@@ -51,6 +51,7 @@ pub fn create_router(service_manager: ServiceManager) -> Router {
     Router::new()
         .route("/services", get(list_services))
         .route("/services/:name", post(create_service))
+        .route("/services/:name/remove", delete(remove_service))
         .route("/services/:name/deploy", post(deploy_service))
         .route("/services/:name/start", post(start_service))
         .route("/services/:name/stop", post(stop_service))
@@ -88,6 +89,17 @@ async fn create_service(
         Ok(_) => Ok(Json("Service created".to_string())),
         Err(e) => Err(e)
     }
+}
+
+/// Remove a service
+async fn remove_service(
+    State(state): State<SharedState>,
+    Path(name): Path<String>,
+) -> Result<Json<String>, ServiceManagerError> {
+    println!("Removing service");
+    let mut service_manager = state.lock().await;
+    service_manager.remove_service(&name);
+    Ok(Json("Service removed".to_string()))
 }
 
 /// Deploy a service
