@@ -30,6 +30,15 @@ mod api {
             .await
     }
 
+    pub async fn deploy_service(name: &str) -> Result<(), reqwest::Error> {
+        reqwest::Client::new()
+            .post(&format!("{}/services/{}/deploy", API_BASE, name))
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        Ok(())
+    }
+
     pub async fn start_service(name: &str) -> Result<(), reqwest::Error> {
         reqwest::Client::new()
             .post(&format!("{}/services/{}/start", API_BASE, name))
@@ -59,6 +68,15 @@ mod api {
             .await?;
         Ok(())
     }
+
+    pub async fn remove_service(name: &str) -> Result<(), reqwest::Error> {
+        reqwest::Client::new()
+            .delete(&format!("{}/services/{}/remove", API_BASE, name))
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        Ok(())
+    }
 }
 
 #[component]
@@ -78,7 +96,7 @@ fn ServiceForm(on_submit: Action<(), Result<(), reqwest::Error>>) -> impl IntoVi
 
     view! {
         <form
-            class="bg-white rounded-lg shadow p-4 mb-4"
+            class="bg-white rounded-lg shadow p-4 ml-4 max-w-md mx-auto"
             on:submit=move |ev| {
                 ev.prevent_default();
                 create_service.dispatch(());
@@ -138,6 +156,11 @@ fn ServiceCard(
         _ => "bg-gray-100 text-gray-800",
     };
 
+    let deploy = create_action(move |_| {
+        let name = service.get().name.clone();
+        async move { api::deploy_service(&name).await }
+    });
+
     let start = create_action(move |_| {
         let name = service.get().name.clone();
         async move { api::start_service(&name).await }
@@ -146,6 +169,15 @@ fn ServiceCard(
     let stop = create_action(move |_| {
         let name = service.get().name.clone();
         async move { api::stop_service(&name).await }
+    });
+
+    let remove = create_action(move |_| {
+        let name = service.get().name.clone();
+        async move {
+            api::remove_service(&name).await?;
+            on_status_change.dispatch(());
+            Ok::<(), reqwest::Error>(())
+        }
     });
 
     create_effect(move |_| {
@@ -167,18 +199,35 @@ fn ServiceCard(
             </div>
             <div class="flex space-x-2">
                 <button
-                    class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded
+                           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-500"
+                    on:click=move |_| deploy.dispatch(())
+                    disabled=move || service.get().status != "Deployed"
+                >
+                    "Deploy"
+                </button>
+                <button
+                    class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded
+                           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-500"
                     on:click=move |_| start.dispatch(())
-                    disabled=move || service.get().status == "Running"
+                    disabled=move || service.get().status == "Running" || service.get().status != "Deployed"
                 >
                     "Start"
                 </button>
                 <button
-                    class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded"
+                    class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded
+                           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-500"
                     on:click=move |_| stop.dispatch(())
-                    disabled=move || service.get().status == "Stopped"
-                >
+                    disabled=move || service.get().status == "Stopped" || service.get().status != "Running"
+                >   
                     "Stop"
+                </button>
+                <button
+                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded
+                           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-500"
+                    on:click=move |_| remove.dispatch(())
+                >
+                    "Remove"
                 </button>
             </div>
         </div>
@@ -209,7 +258,7 @@ fn App() -> impl IntoView {
     });
 
     view! {
-        <div class="container mx-auto p-4">
+        <div class="w-1/3 p-4">
             <h1 class="text-2xl font-bold mb-4">"Service Manager"</h1>
 
             {move || error.get().map(|err| view! {
@@ -218,19 +267,23 @@ fn App() -> impl IntoView {
                 </div>
             })}
 
-            <ServiceForm
-                on_submit=refresh.clone()
-            />
+            <div class="bg-white rounded-lg shadow p-4">
+                <h2 class="text-lg font-semibold mb-4">"Services"</h2>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {move || services.get().into_iter().map(|service| {
-                    view! {
-                        <ServiceCard
-                            service=service
-                            on_status_change=refresh.clone()
-                        />
-                    }
-                }).collect::<Vec<_>>()}
+                <ServiceForm
+                    on_submit=refresh.clone()
+                />
+
+                <div class="space-y-4 mt-4">
+                    {move || services.get().into_iter().map(|service| {
+                        view! {
+                            <ServiceCard
+                                service=service
+                                on_status_change=refresh.clone()
+                            />
+                        }
+                    }).collect::<Vec<_>>()}
+                </div>
             </div>
         </div>
     }

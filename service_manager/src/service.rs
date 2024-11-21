@@ -156,6 +156,7 @@ impl ServiceManager {
 
     /// Removes a service from the manager
     pub fn remove_service(&mut self, service_name: &str) {
+        // TODO: Remove the service from the remote device
         self.services.remove(service_name);
     }
 

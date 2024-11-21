@@ -3,6 +3,8 @@ bm
 *.cross.o
 start*
 **/config/devices.yaml
+**/dist/
+*.log
 
 # Build artifacts
 **/target/
