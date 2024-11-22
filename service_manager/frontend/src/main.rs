@@ -202,7 +202,7 @@ fn ServiceCard(
                     class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded
                            disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-500"
                     on:click=move |_| deploy.dispatch(())
-                    disabled=move || service.get().status != "Deployed"
+                    disabled=move || service.get().status == "Deployed"
                 >
                     "Deploy"
                 </button>
@@ -210,7 +210,7 @@ fn ServiceCard(
                     class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded
                            disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-500"
                     on:click=move |_| start.dispatch(())
-                    disabled=move || service.get().status == "Running" || service.get().status != "Deployed"
+                    disabled=move || service.get().status == "Running"
                 >
                     "Start"
                 </button>
