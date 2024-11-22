@@ -43,6 +43,8 @@ pub enum ServiceManagerError {
     ServiceError(ServiceError),
     #[error("MQTT subscription error: {0}")]
     MqttSubscriptionError(String),
+    #[error("SSH error: {0}")]
+    SshError(String),
 }
 
 // Manual implementations with logging

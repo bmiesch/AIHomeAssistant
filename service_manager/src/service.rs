@@ -11,8 +11,9 @@ use crate::error::*;
 use tracing::{info, error};
 use dotenv::dotenv;
 use std::env;
-use paho_mqtt::SslVersion;
-//------------------------------------------------------------------------------
+use std::io::Read;
+
+//------------------------s------------------------------------------------------
 // Type Definitions
 //------------------------------------------------------------------------------
 
@@ -105,7 +106,22 @@ impl ServiceManager {
     fn execute_ssh_command(ssh: &Session, cmd: &str) -> Result<(), ServiceManagerError> {
         let mut channel = ssh.channel_session()?;
         channel.exec(cmd)?;
-        channel.close()?;        
+
+        let mut stdout = String::new();
+        channel.read_to_string(&mut stdout)?;
+        let mut stderr = String::new();
+        channel.stderr().read_to_string(&mut stderr)?;
+
+        channel.wait_close()?;
+        let exit_status = channel.exit_status()?;
+
+        if exit_status != 0 {
+            return Err(ServiceManagerError::SshError(format!(
+                "Command '{}' failed with status {}\nStderr: {}",
+                cmd, exit_status, stderr
+            )));
+        }
+
         Ok(())
     }
 
@@ -179,7 +195,6 @@ impl ServiceManager {
     /// Deploy a service to a remote device
     pub async fn deploy_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
         let service = self.get_service_mut(service_name)?;
-
         println!("Deploying service: {}", service_name);
 
         println!("Cross-compiling service...");
@@ -201,22 +216,18 @@ impl ServiceManager {
             ));
         }
     
-        // Step 2: Connect to remote device
+        // Connect to remote device
         let ssh = Self::connect_ssh(&service.device)?;
-    
-        // Step 3: Create service directory on remote device
         Self::execute_ssh_command(&ssh, "sudo mkdir -p /opt/services")?;
         Self::execute_ssh_command(&ssh, &format!("sudo chown {} /opt/services", service.device.config.username))?;
     
-        // Step 4: Copy the binary to remote device
+        // Copy the binary to remote device
         let binary_path = ROOT_DIR.join("targets")
             .join(&service.device.config.arch)
             .join(format!("{}_service", service.name))
             .to_string_lossy()
             .to_string();
         let remote_path = format!("/opt/services/{}", service.name);
-
-        // Verify binary exists locally
         if !std::path::Path::new(&binary_path).exists() {
             return Err(ServiceManagerError::DeploymentError(
                 format!("Binary not found at: {}", binary_path)
@@ -242,24 +253,26 @@ impl ServiceManager {
             ));
         }
 
-        // Set executable permissions
         Self::execute_ssh_command(&ssh, &format!("chmod 755 {}", remote_path))?;
-            
-        // Verify the file exists on remote
         Self::execute_ssh_command(&ssh, &format!("test -f {}", remote_path))?;
-    
-        // Step 5: Create systemd service file
+
+        // First disable and unmask the service if it exists
+        info!("Cleaning up existing service state");
+        Self::execute_ssh_command(&ssh, &format!(
+            "sudo systemctl disable {} || true; \
+            sudo systemctl unmask {} || true; \
+            sudo rm -f /etc/systemd/system/{}",
+            service_name, service_name, service_name
+        ))?;
+
         let service_content = Self::create_service_file(service)?;
-    
-        // Step 6: Install and start the service
         Self::execute_ssh_command(&ssh, &format!(
             "echo '{}' | sudo tee /etc/systemd/system/{}.service",
             service_content, service.name
         ))?;
         
         Self::execute_ssh_command(&ssh, "sudo systemctl daemon-reload")?;
-        Self::execute_ssh_command(&ssh, &format!("sudo systemctl enable {}", service.name))?;
-        Self::execute_ssh_command(&ssh, &format!("sudo systemctl start {}", service.name))?;
+        // Self::execute_ssh_command(&ssh, &format!("sudo systemctl enable {}", service.name))?;
     
         println!("Service {} deployed successfully", service.name);
         service.status = ServiceStatus::Deployed;

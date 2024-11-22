@@ -5,6 +5,8 @@ start*
 **/config/devices.yaml
 **/dist/
 *.log
+targets/arm64
+dump/
 
 # Build artifacts
 **/target/
