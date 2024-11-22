@@ -4,11 +4,14 @@ use ssh2::Session;
 use std::net::TcpStream;
 use std::fs;
 use crate::device::{Device, DeviceRegistry, ROOT_DIR};
-use paho_mqtt::{AsyncClient, CreateOptionsBuilder, ConnectOptionsBuilder};
+use paho_mqtt::{AsyncClient, CreateOptionsBuilder, ConnectOptionsBuilder, SslOptionsBuilder};
 use std::process::Command;
 use serde::Serialize;
 use crate::error::*;
-
+use tracing::{info, error};
+use dotenv::dotenv;
+use std::env;
+use paho_mqtt::SslVersion;
 //------------------------------------------------------------------------------
 // Type Definitions
 //------------------------------------------------------------------------------
@@ -43,7 +46,7 @@ pub struct ServiceManager {
 impl ServiceManager {
     fn create_mqtt_client() -> Result<AsyncClient, ServiceManagerError> {
         let create_opts = CreateOptionsBuilder::new()
-            .server_uri("tcp://localhost:1883")
+            .server_uri("ssl://localhost:8883")
             .client_id("service_manager")
             .finalize();
             
@@ -51,12 +54,24 @@ impl ServiceManager {
     }
 
     fn connect_mqtt_client(client: &AsyncClient) -> Result<(), ServiceManagerError> {
+        dotenv().ok();
+        let mosquitto_path = env::var("MOSQUITTO_PATH").expect("MOSQUITTO_PATH not set");
+        let username = env::var("MQTT_USERNAME").expect("MQTT_USERNAME not set");
+        let password = env::var("MQTT_PASSWORD").expect("MQTT_PASSWORD not set");
+
+        let ssl_opts = SslOptionsBuilder::new()
+            .trust_store(format!("{}/ca.crt", mosquitto_path))?
+            .finalize();
+
         let conn_opts = ConnectOptionsBuilder::new()
             .keep_alive_interval(Duration::from_secs(20))
             .clean_session(true)
+            .ssl_options(ssl_opts.clone())
+            .user_name(username)
+            .password(password)
             .finalize();
-            
-        client.connect(conn_opts).wait()?;
+
+        client.connect(conn_opts).wait_for(Duration::from_secs(10))?;
         Ok(())
     }
 
@@ -122,6 +137,7 @@ impl ServiceManager {
     /// Creates a new ServiceManager instance with MQTT connection
     pub fn new(load_devices: bool) -> Result<Self, ServiceManagerError> {
         let client = Self::create_mqtt_client()?;
+        info!("MQTT client created");
         Self::connect_mqtt_client(&client)?;
             
         Ok(Self {
