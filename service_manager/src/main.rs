@@ -8,20 +8,37 @@ use std::env;
 use std::process::Command;
 use std::io;
 use tracing_subscriber;
+use dotenv::dotenv;
 
 //------------------------------------------------------------------------------
 // MQTT Broker default: port 1883
 //------------------------------------------------------------------------------
 fn start_mqtt_broker() -> Result<(), io::Error> {
+    dotenv().ok();
+    let mosquitto_path = env::var("MOSQUITTO_PATH").unwrap();
+
     match env::consts::OS {
         "macos" => {
-            Command::new("brew")
-                .args(["services", "start", "mosquitto"])
-                .status()?;
+            // Check if Mosquitto is already running
+            let status_output = Command::new("brew")
+                .args(["services", "list"])
+                .output()?;
+
+            let status_output_str = String::from_utf8_lossy(&status_output.stdout);
+
+            if status_output_str.contains("mosquitto") && status_output_str.contains("started") {
+                Command::new("brew")
+                    .args(["services", "restart", "mosquitto"])
+                    .status()?;
+            } else {
+                Command::new("brew")
+                    .args(["services", "start", "mosquitto"])
+                    .status()?;
+            }
         }
         "linux" => {
             Command::new("sudo")
-                .args(["systemctl", "start", "mosquitto"])
+                .args(["systemctl", "start", "mosquitto", "--", "-c", &mosquitto_path])
                 .status()?;
         }
         os => {
