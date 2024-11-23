@@ -1,24 +1,28 @@
 #include "core.h"
 #include "log.h"
 #include <chrono>
+#include <fstream>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
+#include <filesystem>
 
 using json = nlohmann::json;
 
 
 Core::Core(const std::string& broker_address, const std::string& client_id) 
-    : mqtt_client(broker_address, client_id),
-      mqtt_conn_opts(mqtt::connect_options_builder()
-        .keep_alive_interval(std::chrono::seconds(20))
-        .clean_session(true)
-        .automatic_reconnect(true)
-        .finalize()) {
-
-    INFO_LOG("Initializing Core with broker: " + broker_address + ", client_id: " + client_id);
-    audio_capture = std::make_unique<AudioCapture>();
-    keyword_detector = std::make_unique<KeywordDetector>();
+    : audio_capture(std::make_unique<AudioCapture>()),
+      keyword_detector(std::make_unique<KeywordDetector>()),
+      mqtt_client(broker_address, client_id) {
     
-    mqtt_client.set_callback(*this);
+    try {
+        initializeMqttConnection();
+        mqtt_client.set_callback(*this);
+        INFO_LOG("Core initialized with broker: " + broker_address + ", client_id: " + client_id);
+    }
+    catch (const std::exception& e) {
+        ERROR_LOG("Failed to initialize Core: " + std::string(e.what()));
+        throw;
+    }
 }
 
 Core::~Core() {
@@ -169,6 +173,49 @@ void Core::Stop() {
     }
     catch (const mqtt::exception& e) {
         ERROR_LOG("MQTT disconnect error: " + std::string(e.what()));
+    }
+}
+
+void Core::initializeMqttConnection() {
+    auto getEnvVar = [](const char* name) -> std::string {
+        const char* value = std::getenv(name);
+        if (!value) {
+            throw std::runtime_error(std::string("Environment variable not set: ") + name);
+        }
+        return std::string(value);
+    };
+
+    const auto username = getEnvVar("MQTT_USERNAME");
+    const auto password = getEnvVar("MQTT_PASSWORD");
+    const auto ca_path = getEnvVar("MQTT_CA_DIR") + "/ca.crt";
+
+    // Test CA certificate file access
+    {
+        std::ifstream cert_file(ca_path);
+        if (!cert_file.good()) {
+            ERROR_LOG("Cannot read CA certificate at: " + ca_path);
+            throw std::runtime_error("CA certificate not readable");
+        }
+        INFO_LOG("Successfully opened CA certificate");
+    }
+
+    try {
+        mqtt_ssl_opts = mqtt::ssl_options_builder()
+            .trust_store(ca_path)
+            .enable_server_cert_auth(true)
+            .finalize();
+
+        mqtt_conn_opts = mqtt::connect_options_builder()
+            .keep_alive_interval(std::chrono::seconds(20))
+            .clean_session(true)
+            .automatic_reconnect(true)
+            .user_name(username)
+            .password(password)
+            .ssl(mqtt_ssl_opts)
+            .finalize();
+    }
+    catch (const mqtt::exception& e) {
+        throw std::runtime_error("MQTT configuration failed: " + std::string(e.what()));
     }
 }
 

@@ -27,6 +27,7 @@ private:
     std::condition_variable audio_queue_cv;
 
     mqtt::async_client mqtt_client;
+    mqtt::ssl_options mqtt_ssl_opts;
     mqtt::connect_options mqtt_conn_opts;
 
     void AudioCaptureLoop();
@@ -38,6 +39,7 @@ private:
     void message_arrived(mqtt::const_message_ptr msg) override;
     void delivery_complete(mqtt::delivery_token_ptr token) override;
 
+    void initializeMqttConnection();
     void PublishLEDManagerCommand(const std::string& command, const json& params);
     void HandleServiceStatus(const std::string& topic, const std::string& payload);
 
