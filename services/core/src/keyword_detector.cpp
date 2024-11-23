@@ -129,7 +129,6 @@ Command KeywordDetector::DetectCommand(const std::vector<int16_t>& buffer, bool 
         std::string hypothesis(hyp);
         DEBUG_LOG("Detected command hypothesis: " + hypothesis);
 
-        // Check for commands
         if (hypothesis == "turn light on") {
             if (verbose) INFO_LOG("Command detected: TURN_ON");
             return Command::TURN_ON;
@@ -144,7 +143,6 @@ Command KeywordDetector::DetectCommand(const std::vector<int16_t>& buffer, bool 
 }
 
 void KeywordDetector::CreateConfigWithFiles() {
-    // Create temporary files in RAM disk
     WriteStringToFile(GetTempPath("keyword.dict"), KEYWORD_DICT);
     WriteStringToFile(GetTempPath("keyword.list"), KEYWORD_LIST);
     WriteStringToFile(GetTempPath("commands.gram"), COMMANDS_GRAM);

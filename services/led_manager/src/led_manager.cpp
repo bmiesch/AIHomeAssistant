@@ -1,19 +1,22 @@
 #include "led_manager.h"
 #include "log.h"
+#include <fstream>
 
 using json = nlohmann::json;
 
 LEDManager::LEDManager(const std::vector<BLEDeviceConfig>& configs, const std::string& broker_address, const std::string& client_id)
     : device_configs(configs),
-      mqtt_client(broker_address, client_id),
-      mqtt_conn_opts(mqtt::connect_options_builder()
-        .keep_alive_interval(std::chrono::seconds(20))
-        .clean_session(true)
-        .automatic_reconnect(true)
-        .finalize()) {
-    
-    INFO_LOG("Initializing LEDManager with broker: " + broker_address + ", client_id: " + client_id);
-    mqtt_client.set_callback(*this);
+      mqtt_client(broker_address, client_id) {
+
+    try {
+        InitializeMqttConnection();
+        mqtt_client.set_callback(*this);
+        INFO_LOG("LEDManager initialized with broker: " + broker_address + ", client_id: " + client_id);
+    }
+    catch (const std::exception& e) {
+        ERROR_LOG("Failed to initialize LEDManager: " + std::string(e.what()));
+        throw;
+    }
 }
 
 LEDManager::~LEDManager() {
@@ -33,7 +36,6 @@ void LEDManager::Initialize() {
         throw;
     }
 
-    // Create and start the worker thread
     INFO_LOG("Starting main worker thread");
     worker_thread = std::thread(&LEDManager::Run, this);
 }
@@ -99,6 +101,49 @@ void LEDManager::Stop() {
         DEBUG_LOG("MQTT client disconnected");
     } catch (const mqtt::exception& e) {
         ERROR_LOG("Error disconnecting from MQTT broker: " + std::string(e.what()));
+    }
+}
+
+void LEDManager::InitializeMqttConnection() {
+    auto getEnvVar = [](const char* name) -> std::string {
+        const char* value = std::getenv(name);
+        if (!value) {
+            throw std::runtime_error(std::string("Environment variable not set: ") + name);
+        }
+        return std::string(value);
+    };
+
+    const auto username = getEnvVar("MQTT_USERNAME");
+    const auto password = getEnvVar("MQTT_PASSWORD");
+    const auto ca_path = getEnvVar("MQTT_CA_DIR") + "/ca.crt";
+
+    // Test CA certificate file access
+    {
+        std::ifstream cert_file(ca_path);
+        if (!cert_file.good()) {
+            ERROR_LOG("Cannot read CA certificate at: " + ca_path);
+            throw std::runtime_error("CA certificate not readable");
+        }
+        INFO_LOG("Successfully opened CA certificate");
+    }
+
+    try {
+        mqtt_ssl_opts = mqtt::ssl_options_builder()
+            .trust_store(ca_path)
+            .enable_server_cert_auth(true)
+            .finalize();
+
+        mqtt_conn_opts = mqtt::connect_options_builder()
+            .keep_alive_interval(std::chrono::seconds(20))
+            .clean_session(true)
+            .automatic_reconnect(true)
+            .user_name(username)
+            .password(password)
+            .ssl(mqtt_ssl_opts)
+            .finalize();
+    }
+    catch (const mqtt::exception& e) {
+        throw std::runtime_error("MQTT configuration failed: " + std::string(e.what()));
     }
 }
 

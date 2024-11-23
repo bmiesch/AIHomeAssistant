@@ -40,12 +40,14 @@ private:
         }}
     };
 
+    void InitializeMqttConnection();
     void InitAdapter();
     void FindAndInitDevices(std::vector<BLEDeviceConfig>& dc);
     void PublishStatus();
     void HandleCommand(const json& command);
 
     mqtt::async_client mqtt_client;
+    mqtt::ssl_options mqtt_ssl_opts;
     mqtt::connect_options mqtt_conn_opts;
     
     // MQTT topics

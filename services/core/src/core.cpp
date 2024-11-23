@@ -4,7 +4,6 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
-#include <filesystem>
 
 using json = nlohmann::json;
 
@@ -15,7 +14,7 @@ Core::Core(const std::string& broker_address, const std::string& client_id)
       mqtt_client(broker_address, client_id) {
     
     try {
-        initializeMqttConnection();
+        InitializeMqttConnection();
         mqtt_client.set_callback(*this);
         INFO_LOG("Core initialized with broker: " + broker_address + ", client_id: " + client_id);
     }
@@ -159,8 +158,6 @@ void Core::Stop() {
         std::queue<std::vector<int16_t>> empty;
         std::swap(audio_queue, empty);
     }
-
-    // Wake up any waiting threads
     audio_queue_cv.notify_all();
     
     if (audio_processing_thread.joinable()) audio_processing_thread.join();
@@ -176,7 +173,7 @@ void Core::Stop() {
     }
 }
 
-void Core::initializeMqttConnection() {
+void Core::InitializeMqttConnection() {
     auto getEnvVar = [](const char* name) -> std::string {
         const char* value = std::getenv(name);
         if (!value) {

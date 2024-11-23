@@ -16,5 +16,10 @@ Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 Environment=HOME=/home/{username}
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 
+Environment=MQTT_BROKER={mqtt_broker}
+Environment=MQTT_USERNAME={mqtt_username}
+Environment=MQTT_PASSWORD={mqtt_password}
+Environment=MQTT_CA_DIR={mqtt_ca_dir}
+
 [Install]
 WantedBy=multi-user.target
