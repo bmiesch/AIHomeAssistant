@@ -17,8 +17,11 @@ int main() {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
-    // Default address for MQTT Broker
-    std::string broker_address = "tcp://localhost:1883";
+    std::string broker_address = std::getenv("MQTT_BROKER");
+    if (broker_address.empty()) {
+        ERROR_LOG("MQTT_BROKER environment variable not set.");
+        return 1;
+    }
 
     // LED configurations
     std::vector<BLEDeviceConfig> device_configs = {
