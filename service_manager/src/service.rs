@@ -9,7 +9,6 @@ use std::process::Command;
 use serde::Serialize;
 use crate::error::*;
 use tracing::{info, error};
-use dotenv::dotenv;
 use std::env;
 use std::io::Read;
 
@@ -46,8 +45,9 @@ pub struct ServiceManager {
 // MQTT Implementations
 impl ServiceManager {
     fn create_mqtt_client() -> Result<AsyncClient, ServiceManagerError> {
+        let mqtt_broker = env::var("MQTT_BROKER").expect("MQTT_BROKER not set");
         let create_opts = CreateOptionsBuilder::new()
-            .server_uri("ssl://localhost:8883")
+            .server_uri(mqtt_broker)
             .client_id("service_manager")
             .finalize();
             
@@ -55,10 +55,9 @@ impl ServiceManager {
     }
 
     fn connect_mqtt_client(client: &AsyncClient) -> Result<(), ServiceManagerError> {
-        dotenv().ok();
-        let mosquitto_path = env::var("MOSQUITTO_PATH").expect("MOSQUITTO_PATH not set");
-        let username = env::var("MQTT_USERNAME").expect("MQTT_USERNAME not set");
-        let password = env::var("MQTT_PASSWORD").expect("MQTT_PASSWORD not set");
+        let mosquitto_path = env::var("SM_MOSQUITTO_DIR").expect("MOSQUITTO_PATH not set");
+        let mqtt_username = env::var("MQTT_USERNAME").expect("MQTT_USERNAME not set");
+        let mqtt_password = env::var("MQTT_PASSWORD").expect("MQTT_PASSWORD not set");
 
         let ssl_opts = SslOptionsBuilder::new()
             .trust_store(format!("{}/ca.crt", mosquitto_path))?
@@ -68,8 +67,8 @@ impl ServiceManager {
             .keep_alive_interval(Duration::from_secs(20))
             .clean_session(true)
             .ssl_options(ssl_opts.clone())
-            .user_name(username)
-            .password(password)
+            .user_name(mqtt_username)
+            .password(mqtt_password)
             .finalize();
 
         client.connect(conn_opts).wait_for(Duration::from_secs(10))?;
@@ -78,17 +77,15 @@ impl ServiceManager {
 
     async fn subscribe_to_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
         let subscribe_token = self.mqtt_client.subscribe(service_name, 1);
-        
-        match subscribe_token.wait() {
-            Ok(_) => {
-                println!("Successfully subscribed to service: {}", service_name);
-                Ok(())
-            },
-            Err(e) => Err(ServiceManagerError::MqttSubscriptionError(format!(
-                "MQTT subscription failed for service '{}': {:?}",
-                service_name, e
-            )))
-        }
+
+        subscribe_token.wait()?;
+        Ok(())
+    }
+
+    async fn subscribe_to_all_services(&mut self) -> Result<(), ServiceManagerError> {
+        let subscribe_token = self.mqtt_client.subscribe("#", 1);
+        subscribe_token.wait()?;
+        Ok(())
     }
 }
 
@@ -136,8 +133,17 @@ impl ServiceManager {
     }
 
     fn create_service_file(service: &Service) -> Result<String, ServiceManagerError> {
+        let mqtt_broker = env::var("MQTT_BROKER").expect("MQTT_BROKER not set");
+        let mqtt_username = env::var("MQTT_USERNAME").expect("MQTT_USERNAME not set");
+        let mqtt_password = env::var("MQTT_PASSWORD").expect("MQTT_PASSWORD not set");
+        let mqtt_ca_dir = env::var("SERVICES_CA_DIR").expect("SERVICES_CA_DIR not set");
+
         let template = Self::read_service_template(&service.name)?;
-        Ok(template.replace("{username}", &service.device.config.username))
+        Ok(template.replace("{mqtt_broker}", &mqtt_broker)
+            .replace("{mqtt_username}", &mqtt_username)
+            .replace("{mqtt_password}", &mqtt_password)
+            .replace("{mqtt_ca_dir}", &mqtt_ca_dir)
+            .replace("{username}", &service.device.config.username))
     }
 
     fn get_service_mut(&mut self, service_name: &str) -> Result<&mut Service, ServiceManagerError> {
@@ -216,12 +222,10 @@ impl ServiceManager {
             ));
         }
     
-        // Connect to remote device
+        // Copy the binary to remote device
         let ssh = Self::connect_ssh(&service.device)?;
         Self::execute_ssh_command(&ssh, "sudo mkdir -p /opt/services")?;
         Self::execute_ssh_command(&ssh, &format!("sudo chown {} /opt/services", service.device.config.username))?;
-    
-        // Copy the binary to remote device
         let binary_path = ROOT_DIR.join("targets")
             .join(&service.device.config.arch)
             .join(format!("{}_service", service.name))
@@ -234,7 +238,6 @@ impl ServiceManager {
             ));
         }
 
-        // Copy file using scp command
         let status = Command::new("sshpass")
             .arg("-p")
             .arg(&service.device.config.password)
@@ -252,9 +255,39 @@ impl ServiceManager {
                 "Failed to copy binary to remote device".to_string()
             ));
         }
-
         Self::execute_ssh_command(&ssh, &format!("chmod 755 {}", remote_path))?;
         Self::execute_ssh_command(&ssh, &format!("test -f {}", remote_path))?;
+
+        // Copy CA certificate to remote device
+        let local_ca_cert_dir = env::var("SM_MOSQUITTO_DIR").expect("SM_MOSQUITTO_DIR not set");
+        let local_ca_cert_path = format!("{}/ca.crt", local_ca_cert_dir);
+        let remote_ca_dir = env::var("SERVICES_CA_DIR").expect("SERVICES_CA_DIR not set");
+        let remote_ca_path = format!("{}/ca.crt", remote_ca_dir);
+        Self::execute_ssh_command(&ssh, &format!("sudo rm -rf {}", remote_ca_dir))?;
+        Self::execute_ssh_command(&ssh, &format!("sudo mkdir -p {}", remote_ca_dir))?;
+        Self::execute_ssh_command(&ssh, &format!("sudo chown {} {}", service.device.config.username, remote_ca_dir))?;
+        Self::execute_ssh_command(&ssh, &format!("sudo chmod 700 {}", remote_ca_dir))?;
+
+        let status = Command::new("sshpass")
+            .args([
+                "-p", &service.device.config.password,
+                "scp",
+                &local_ca_cert_path,
+                &format!("{}@{}:{}",
+                    service.device.config.username,
+                    service.device.config.ip_address,
+                    remote_ca_path
+                )
+            ])
+            .status()?;
+
+        if !status.success() {
+            return Err(ServiceManagerError::DeploymentError(
+                "Failed to copy CA certificate".to_string()
+            ));
+        }
+        Self::execute_ssh_command(&ssh, &format!("sudo chown {} {}", service.device.config.username, remote_ca_path))?;
+        Self::execute_ssh_command(&ssh, &format!("sudo chmod 644 {}", remote_ca_path))?;
 
         // First disable and unmask the service if it exists
         info!("Cleaning up existing service state");

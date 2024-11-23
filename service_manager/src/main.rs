@@ -15,7 +15,7 @@ use dotenv::dotenv;
 //------------------------------------------------------------------------------
 fn start_mqtt_broker() -> Result<(), io::Error> {
     dotenv().ok();
-    let mosquitto_path = env::var("MOSQUITTO_PATH").unwrap();
+    let mosquitto_path = env::var("SM_MOSQUITTO_DIR").expect("SM_MOSQUITTO_DIR not set");
 
     match env::consts::OS {
         "macos" => {
@@ -75,30 +75,37 @@ fn stop_mqtt_broker() -> Result<(), io::Error> {
 
 #[tokio::main]
 async fn main() {
-
+    // Initialize logging
     tracing_subscriber::fmt()
-        .with_target(false)      // Don't include the target (module path)
-        .with_thread_ids(true)   // Include thread IDs for async debugging
-        .with_level(true)        // Include log level (INFO, ERROR, etc)
-        .with_file(true)         // Include file name
-        .with_line_number(true)  // Include line number
-        .pretty()                // Use pretty formatting (more readable)
+        .with_target(false)
+        .with_thread_ids(true)
+        .with_level(true)
+        .with_file(true)
+        .with_line_number(true)
+        .pretty()
         .init();
 
+    // Load environment variables
+    dotenv().ok();
+
+    // Start MQTT broker
     start_mqtt_broker().unwrap();
 
-    // Your existing ServiceManager initialization
+    // Initialize service manager
     let service_manager = ServiceManager::new(true)
         .expect("Failed to initialize service manager");
     
+    // Start API server
     println!("Starting API server on http://127.0.0.1:3000");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
     
+    // Serve API requests
     axum::serve(listener, api::create_router(service_manager))
         .await
         .unwrap();
 
+    // Stop MQTT broker
     stop_mqtt_broker().unwrap();
 }
