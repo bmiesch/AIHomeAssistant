@@ -33,6 +33,9 @@ private:
     void AudioCaptureLoop();
     void AudioProcessingLoop();
 
+    // Topics
+    const std::string STATUS_TOPIC = "home/services/core/status";
+
     // MQTT callback overrides
     void connected(const std::string& cause) override;
     void connection_lost(const std::string& cause) override;
@@ -42,6 +45,7 @@ private:
     void InitializeMqttConnection();
     void PublishLEDManagerCommand(const std::string& command, const json& params);
     void HandleServiceStatus(const std::string& topic, const std::string& payload);
+    void PublishStatus();
 
     std::thread worker_thread;
     void Run();

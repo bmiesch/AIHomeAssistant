@@ -84,17 +84,11 @@ void LEDManager::Run() {
             HandleCommand(command);
         }
 
-        // Publish status
+        // Publish heartbeat status
         now = std::chrono::steady_clock::now();
         if (now - last_status_time >= status_interval) {
-            try {
-                PublishStatus();
-                last_status_time = now;
-            } catch (const std::exception& e) {
-                if (running) {
-                    ERROR_LOG("Error publishing status: " + std::string(e.what()));
-                }
-            }
+            PublishStatus();
+            last_status_time = now;
         }
     }
     INFO_LOG("LEDManager stopped");
@@ -116,6 +110,7 @@ void LEDManager::Stop() {
     }
     
     try {
+        mqtt_client.publish(STATUS_TOPIC, "{\"status\": \"offline\"}", 1, false);
         mqtt_client.disconnect()->wait();
         DEBUG_LOG("MQTT client disconnected");
     } catch (const mqtt::exception& e) {
@@ -146,6 +141,8 @@ void LEDManager::InitializeMqttConnection() {
         INFO_LOG("Successfully opened CA certificate");
     }
 
+    mqtt::will_options will_opts(STATUS_TOPIC, mqtt::binary_ref("offline"), 1, false);
+
     try {
         mqtt_ssl_opts = mqtt::ssl_options_builder()
             .trust_store(ca_path)
@@ -158,6 +155,7 @@ void LEDManager::InitializeMqttConnection() {
             .automatic_reconnect(true)
             .user_name(username)
             .password(password)
+            .will(will_opts)
             .ssl(mqtt_ssl_opts)
             .finalize();
     }

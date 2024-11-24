@@ -8,6 +8,7 @@ use serde::Serialize;
 use crate::error::*;
 use tracing::{info, error};
 use std::env;
+use tokio::sync::broadcast;
 
 //------------------------s------------------------------------------------------
 // Type Definitions
@@ -41,14 +42,37 @@ pub struct ServiceManager {
 
 // MQTT Implementations
 impl ServiceManager {
-    fn create_mqtt_client() -> Result<AsyncClient, ServiceManagerError> {
+    fn create_mqtt_client(event_tx: &broadcast::Sender<String>) -> Result<AsyncClient, ServiceManagerError> {
         let mqtt_broker = env::var("MQTT_BROKER").expect("MQTT_BROKER not set");
         let create_opts = CreateOptionsBuilder::new()
             .server_uri(mqtt_broker)
             .client_id("service_manager")
             .finalize();
-            
-        Ok(AsyncClient::new(create_opts)?)
+
+        let client = AsyncClient::new(create_opts)?;
+
+        // Set up message callback
+        let event_tx = event_tx.clone();
+        client.set_message_callback(move |_cli, msg| {
+            if let Some(msg) = msg {
+                let message = format!(
+                    "Received message on topic '{}': {}", 
+                    msg.topic(), 
+                    msg.payload_str()
+                );
+                if let Err(e) = event_tx.send(message) {
+                    tracing::error!("Failed to send MQTT message to event bus: {}", e);
+                }
+            }
+        });
+
+        // Connect the client
+        Self::connect_mqtt_client(&client)?;
+
+        // Subscribe to all services
+        Self::subscribe_to_all_services(&client)?;
+        
+        Ok(client)
     }
 
     fn connect_mqtt_client(client: &AsyncClient) -> Result<(), ServiceManagerError> {
@@ -78,8 +102,8 @@ impl ServiceManager {
         Ok(())
     }
 
-    async fn subscribe_to_all_services(&mut self) -> Result<(), ServiceManagerError> {
-        let subscribe_token = self.mqtt_client.subscribe("#", 1);
+    fn subscribe_to_all_services(client: &AsyncClient) -> Result<(), ServiceManagerError> {
+        let subscribe_token = client.subscribe("#", 1);
         subscribe_token.wait()?;
         Ok(())
     }
@@ -122,14 +146,10 @@ impl ServiceManager {
 // Service Manager Implementations
 impl ServiceManager {
     /// Creates a new ServiceManager instance with MQTT connection
-    pub fn new(load_devices: bool) -> Result<Self, ServiceManagerError> {
-        let client = Self::create_mqtt_client()?;
-        info!("MQTT client created");
-        Self::connect_mqtt_client(&client)?;
-            
+    pub fn new(load_devices: bool, event_tx: broadcast::Sender<String>) -> Result<Self, ServiceManagerError> {
         Ok(Self {
             services: HashMap::new(),
-            mqtt_client: client,
+            mqtt_client: Self::create_mqtt_client(&event_tx)?,
             devices: DeviceRegistry::new(load_devices)?,
         })
     }

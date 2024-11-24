@@ -2,12 +2,15 @@ mod device;
 mod error;
 mod service;
 mod api;
+mod websocket;
 
 use service::ServiceManager;
+use websocket::WebSocketServer;
 use std::env;
 use std::process::Command;
 use std::io;
 use tracing_subscriber;
+use tracing::info;
 use dotenv::dotenv;
 
 //------------------------------------------------------------------------------
@@ -74,7 +77,7 @@ fn stop_mqtt_broker() -> Result<(), io::Error> {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     tracing_subscriber::fmt()
         .with_target(false)
@@ -89,23 +92,35 @@ async fn main() {
     dotenv().ok();
 
     // Start MQTT broker
-    start_mqtt_broker().unwrap();
+    start_mqtt_broker()?;
+
+    // Create event channel
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(100);
 
     // Initialize service manager
-    let service_manager = ServiceManager::new(true)
-        .expect("Failed to initialize service manager");
-    
+    let service_manager = ServiceManager::new(true, event_tx)
+        .map_err(|e| {
+            eprintln!("Failed to initialize ServiceManager: {}", e);
+            e
+        })?;
+
+    // Start WebSocket server
+    let websocket_addr = "127.0.0.1:9001";
+    tokio::spawn(async move {
+        if let Err(e) = WebSocketServer::run(websocket_addr, event_rx).await {
+            eprintln!("Failed to start WebSocket server: {}", e);
+        }
+    });
+
     // Start API server
-    println!("Starting API server on http://127.0.0.1:3000");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
-        .await
-        .unwrap();
+    info!("Starting API server on http://127.0.0.1:3000");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
     
     // Serve API requests
-    axum::serve(listener, api::create_router(service_manager))
-        .await
-        .unwrap();
+    axum::serve(listener, api::create_router(service_manager)).await?;
 
     // Stop MQTT broker
-    stop_mqtt_broker().unwrap();
+    stop_mqtt_broker()?;
+
+    Ok(())
 }

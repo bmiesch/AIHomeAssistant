@@ -43,6 +43,8 @@ pub enum ServiceManagerError {
     TemplateError(String),
     #[error("Service error: {0}")]
     ServiceError(ServiceError),
+    #[error("WebSocket error: {0}")]
+    WebSocketError(String),
 }
 
 // Manual implementations with logging
