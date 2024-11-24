@@ -23,6 +23,10 @@ pub enum DeviceError {
     YamlError(serde_yaml::Error),
     #[error("Device not found: {0}")]
     DeviceNotFound(String),
+    #[error("SSH2 error: {0}")]
+    Ssh2Error(Ssh2Error),
+    #[error("SSH error: {0}")]
+    SshError(String),
 }
 
 #[derive(Debug, Error)]
@@ -31,20 +35,14 @@ pub enum ServiceManagerError {
     MqttError(MqttError),
     #[error("IO error: {0}")]
     IoError(std::io::Error),
-    #[error("SSH2 error: {0}")]
-    Ssh2Error(Ssh2Error),
     #[error("Deployment error: {0}")]
     DeploymentError(String),
-    #[error("Error loading devices: {0}")]
+    #[error("Device error: {0}")]
     DeviceError(DeviceError),
     #[error("Template error: {0}")]
     TemplateError(String),
     #[error("Service error: {0}")]
     ServiceError(ServiceError),
-    #[error("MQTT subscription error: {0}")]
-    MqttSubscriptionError(String),
-    #[error("SSH error: {0}")]
-    SshError(String),
 }
 
 // Manual implementations with logging
@@ -62,6 +60,13 @@ impl From<serde_yaml::Error> for DeviceError {
     }
 }
 
+impl From<Ssh2Error> for DeviceError {
+    fn from(err: Ssh2Error) -> Self {
+        error!(?err, "SSH error occurred");
+        DeviceError::Ssh2Error(err)
+    }
+}
+
 impl From<ServiceError> for ServiceManagerError {
     fn from(err: ServiceError) -> Self {
         error!(?err, "Service error occurred");
@@ -73,13 +78,6 @@ impl From<MqttError> for ServiceManagerError {
     fn from(err: MqttError) -> Self {
         error!(?err, "MQTT error occurred");
         ServiceManagerError::MqttError(err)
-    }
-}
-
-impl From<Ssh2Error> for ServiceManagerError {
-    fn from(err: Ssh2Error) -> Self {
-        error!(?err, "SSH error occurred");
-        ServiceManagerError::Ssh2Error(err)
     }
 }
 

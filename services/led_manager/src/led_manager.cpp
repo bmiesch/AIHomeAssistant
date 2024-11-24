@@ -46,10 +46,28 @@ void LEDManager::Run() {
     INFO_LOG("LEDManager running...");
 
     auto last_status_time = std::chrono::steady_clock::now();
+    auto last_reconnect_time = std::chrono::steady_clock::now();
+    auto last_reinit_time = std::chrono::steady_clock::now();
     const auto status_interval = std::chrono::seconds(5);
+    const auto reconnect_interval = std::chrono::seconds(10);
+    const auto reinit_interval = std::chrono::seconds(60);
 
     while (running) {
+        // Reinitialize devices if they are not connected
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_reinit_time >= reinit_interval) {
+            ReinitDevices();
+            last_reinit_time = now;
+        }
 
+        // Reconnect devices if they are disconnected
+        now = std::chrono::steady_clock::now();
+        if (now - last_reconnect_time >= reconnect_interval) {
+            ReconnectDevices();
+            last_reconnect_time = now;
+        }
+
+        // Handle commands
         json command;
         {
             std::unique_lock<std::mutex> lock(cmd_queue_mutex);
@@ -66,7 +84,8 @@ void LEDManager::Run() {
             HandleCommand(command);
         }
 
-        auto now = std::chrono::steady_clock::now();
+        // Publish status
+        now = std::chrono::steady_clock::now();
         if (now - last_status_time >= status_interval) {
             try {
                 PublishStatus();
@@ -189,6 +208,31 @@ void LEDManager::FindAndInitDevices(std::vector<BLEDeviceConfig>& dc) {
     }
 }
 
+void LEDManager::FindAndInitDevice(BLEDeviceConfig& config) {
+    adapter->scan_for(5000);
+    auto peripherals = adapter->scan_get_results();
+    DEBUG_LOG("Found " + std::to_string(peripherals.size()) + " BLE devices");
+
+    for (auto& peripheral : peripherals) {
+        if (peripheral.address() == config.address) {
+            try {
+                auto device = std::make_unique<BLEDevice>(
+                    std::make_unique<SimpleBLE::Peripheral>(std::move(peripheral)),
+                    config.address,
+                    config.serv_uuid,
+                    config.char_uuid);
+                std::lock_guard<std::mutex> lock(devices_mutex);
+                devices.push_back(std::move(device));
+                INFO_LOG("Successfully initialized device: " + config.address);
+                return;
+            } catch (const std::exception& e) {
+                ERROR_LOG("Failed to initialize device " + config.address + ": " + e.what());
+            }
+        }
+    }
+    WARN_LOG("Device not found: " + config.address);
+}
+
 void LEDManager::PublishStatus() {
     json status;
     status["status"] = "online";
@@ -221,30 +265,36 @@ void LEDManager::HandleCommand(const json& payload) {
     }
 }
 
+void LEDManager::ReconnectDevices() {
+    for (auto& device : devices) {
+        device->Connect();
+    }
+}
+
+void LEDManager::ReinitDevices() {
+    for (auto& config : device_configs) {
+        if (std::find_if(devices.begin(), devices.end(), 
+                         [config](const std::unique_ptr<BLEDevice>& d) {
+                             return d->GetAddress() == config.address;
+                         }) == devices.end()) {
+            FindAndInitDevice(config);
+        }
+    }
+}
+
 void LEDManager::TurnOnAll() {
     INFO_LOG("Turning on all devices");
     std::lock_guard<std::mutex> lock(devices_mutex);
     for (auto& device : devices) {
-        try {
-            if (!device->IsConnected()) device->Connect();
-            device->TurnOn();
-            INFO_LOG("Turned on device: " + device->GetAddress());
-        } catch (const std::exception& e) {
-            ERROR_LOG("Error with device " + device->GetAddress() + ": " + std::string(e.what()));
-        }
+        device->TurnOn();
     }
 }
+
 void LEDManager::TurnOffAll() {
     INFO_LOG("Turning off all devices");
     std::lock_guard<std::mutex> lock(devices_mutex);
     for (auto& device : devices) {
-        try {
-            if (!device->IsConnected()) device->Connect();
-            device->TurnOff();
-            INFO_LOG("Turned off device: " + device->GetAddress());
-        } catch (const std::exception& e) {
-            ERROR_LOG("Error with device " + device->GetAddress() + ": " + std::string(e.what()));
-        }
+        device->TurnOff();
     }
 }
 
@@ -254,13 +304,7 @@ void LEDManager::SetColor(int r, int g, int b) {
              ", B:" + std::to_string(b) + ")");
     std::lock_guard<std::mutex> lock(devices_mutex);
     for (auto& device : devices) {
-        try {
-            if (!device->IsConnected()) device->Connect();
-            device->SetColor(r, g, b);
-            INFO_LOG("Set color for device: " + device->GetAddress());
-        } catch (const std::exception& e) {
-            ERROR_LOG("Error with device " + device->GetAddress() + ": " + std::string(e.what()));
-        }
+        device->SetColor(r, g, b);
     }
 }
 
