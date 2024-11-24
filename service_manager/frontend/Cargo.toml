@@ -6,8 +6,11 @@ edition = "2021"
 [dependencies]
 leptos = { version = "0.5", features = ["csr"] }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.132"
 reqwest = { version = "0.11", features = ["json"] }
 futures = "0.3"
+web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent", "ErrorEvent"] }
+gloo-console = "0.3"
 
 # Optionally share types with backend
 service_manager = { path = ".." }

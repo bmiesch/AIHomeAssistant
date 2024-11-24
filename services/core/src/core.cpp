@@ -143,7 +143,17 @@ void Core::Run() {
     INFO_LOG("Starting audio processing thread");
     audio_processing_thread = std::thread(&Core::AudioProcessingLoop, this);
 
+    auto last_status_time = std::chrono::steady_clock::now();
+    const auto status_interval = std::chrono::seconds(5);
+
     while (running) {
+
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_status_time >= status_interval) {
+            PublishStatus();
+            last_status_time = now;
+        }
+
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 }   
@@ -165,6 +175,7 @@ void Core::Stop() {
     if (worker_thread.joinable()) worker_thread.join();
 
     try {
+        mqtt_client.publish(STATUS_TOPIC, "{\"status\": \"offline\"}", 1, false);
         mqtt_client.disconnect()->wait();
         DEBUG_LOG("MQTT client disconnected");
     }
@@ -196,6 +207,8 @@ void Core::InitializeMqttConnection() {
         INFO_LOG("Successfully opened CA certificate");
     }
 
+    mqtt::will_options will_opts(STATUS_TOPIC, mqtt::binary_ref("offline"), 1, false);
+
     try {
         mqtt_ssl_opts = mqtt::ssl_options_builder()
             .trust_store(ca_path)
@@ -208,6 +221,7 @@ void Core::InitializeMqttConnection() {
             .automatic_reconnect(true)
             .user_name(username)
             .password(password)
+            .will(will_opts)
             .ssl(mqtt_ssl_opts)
             .finalize();
     }
@@ -237,6 +251,13 @@ void Core::HandleServiceStatus(const std::string& topic, const std::string& payl
     // React to service status changes if necessary
 }
 
+void Core::PublishStatus() {
+    try {
+        mqtt_client.publish(STATUS_TOPIC, R"({"status":"online"})", 1, false);
+    } catch (const mqtt::exception& e) {
+        ERROR_LOG("Error publishing status: " + std::string(e.what()));
+    }
+}
 
 /*
  * MQTT Callback Functions

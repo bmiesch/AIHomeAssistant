@@ -1,5 +1,10 @@
+mod parser;
+
 use leptos::*;
+use wasm_bindgen::prelude::*;
+use web_sys::WebSocket;
 use serde::{Deserialize, Serialize};
+use gloo_console as console;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Service {
@@ -76,6 +81,60 @@ mod api {
             .send()
             .await?;
         Ok(())
+    }
+}
+
+#[component]
+fn WebSocketComponent() -> impl IntoView {
+    let (messages, set_messages) = create_signal(String::new());
+
+    let clear_messages = move |_| set_messages.set(String::new());
+
+    spawn_local(async move {
+        let ws = WebSocket::new("ws://localhost:9001")
+            .expect("Failed to create WebSocket connection");
+
+        let onmessage_callback = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
+            if let Some(data) = e.data().as_string() {
+                // Debug print raw message
+                console::log!("Raw message:", &data);
+                
+                let formatted_message = parser::format_message(&data);
+                
+                // Debug print formatted message
+                console::log!("Formatted:", &formatted_message);
+                set_messages.update(|msg| msg.push_str(&format!("{}\n", formatted_message)));
+            }
+        }) as Box<dyn FnMut(_)>);
+
+        let onerror_callback = Closure::wrap(Box::new(move |e: web_sys::ErrorEvent| {
+            println!("WebSocket error: {:?}", e);
+        }) as Box<dyn FnMut(_)>);
+
+        ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
+        ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
+
+        onmessage_callback.forget();
+        onerror_callback.forget();
+    });
+
+    view! {
+        <div class="bg-white rounded-lg shadow p-4 mt-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold">"Service Logs"</h2>
+                <button
+                    class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm"
+                    on:click=clear_messages
+                >
+                    "Clear"
+                </button>
+            </div>
+            <div class="h-64 overflow-y-auto">
+                <pre class="whitespace-pre-wrap break-words text-sm text-gray-600 font-mono">
+                    {move || messages.get()}
+                </pre>
+            </div>
+        </div>
     }
 }
 
@@ -258,32 +317,39 @@ fn App() -> impl IntoView {
     });
 
     view! {
-        <div class="w-1/3 p-4">
-            <h1 class="text-2xl font-bold mb-4">"Service Manager"</h1>
+        <div class="flex">
+            <div class="w-1/3 p-4">
+                <h1 class="text-2xl font-bold mb-4">"Service Manager"</h1>
 
-            {move || error.get().map(|err| view! {
-                <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-                    {err}
+                // Error messages
+                {move || error.get().map(|err| view! {
+                    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                        {err}
+                    </div>
+                })}
+
+                <div class="bg-white rounded-lg shadow p-4">
+                    <h2 class="text-lg font-semibold mb-4">"Services"</h2>
+                    
+                    <ServiceForm
+                        on_submit=refresh.clone()
+                    />
+
+                    <div class="space-y-4 mt-4">
+                        {move || services.get().into_iter().map(|service| {
+                            view! {
+                                <ServiceCard
+                                    service=service
+                                    on_status_change=refresh.clone()
+                                />
+                            }
+                        }).collect::<Vec<_>>()}
+                    </div>
                 </div>
-            })}
+            </div>
 
-            <div class="bg-white rounded-lg shadow p-4">
-                <h2 class="text-lg font-semibold mb-4">"Services"</h2>
-
-                <ServiceForm
-                    on_submit=refresh.clone()
-                />
-
-                <div class="space-y-4 mt-4">
-                    {move || services.get().into_iter().map(|service| {
-                        view! {
-                            <ServiceCard
-                                service=service
-                                on_status_change=refresh.clone()
-                            />
-                        }
-                    }).collect::<Vec<_>>()}
-                </div>
+            <div class="w-1/3 p-4">
+                <WebSocketComponent />
             </div>
         </div>
     }
