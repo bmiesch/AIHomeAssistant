@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 #include <simpleble/SimpleBLE.h>
+#include <atomic>
 
 
 struct BLEDeviceConfig {

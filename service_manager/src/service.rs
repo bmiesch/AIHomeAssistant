@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use std::time::Duration;
-use ssh2::Session;
-use std::net::TcpStream;
 use std::fs;
 use crate::device::{Device, DeviceRegistry, ROOT_DIR};
 use paho_mqtt::{AsyncClient, CreateOptionsBuilder, ConnectOptionsBuilder, SslOptionsBuilder};
@@ -10,7 +8,6 @@ use serde::Serialize;
 use crate::error::*;
 use tracing::{info, error};
 use std::env;
-use std::io::Read;
 
 //------------------------s------------------------------------------------------
 // Type Definitions
@@ -77,7 +74,6 @@ impl ServiceManager {
 
     async fn subscribe_to_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
         let subscribe_token = self.mqtt_client.subscribe(service_name, 1);
-
         subscribe_token.wait()?;
         Ok(())
     }
@@ -91,37 +87,6 @@ impl ServiceManager {
 
 // Service Manager Helper Functions
 impl ServiceManager {
-    fn connect_ssh(device: &Device) -> Result<Session, ServiceManagerError> {
-        let tcp = TcpStream::connect(&format!("{}:22", device.config.ip_address))?;
-        let mut ssh = Session::new()?;
-        ssh.set_tcp_stream(tcp);
-        ssh.handshake()?;
-        ssh.userauth_password(&device.config.username, &device.config.password)?;
-        Ok(ssh)
-    }
-
-    fn execute_ssh_command(ssh: &Session, cmd: &str) -> Result<(), ServiceManagerError> {
-        let mut channel = ssh.channel_session()?;
-        channel.exec(cmd)?;
-
-        let mut stdout = String::new();
-        channel.read_to_string(&mut stdout)?;
-        let mut stderr = String::new();
-        channel.stderr().read_to_string(&mut stderr)?;
-
-        channel.wait_close()?;
-        let exit_status = channel.exit_status()?;
-
-        if exit_status != 0 {
-            return Err(ServiceManagerError::SshError(format!(
-                "Command '{}' failed with status {}\nStderr: {}",
-                cmd, exit_status, stderr
-            )));
-        }
-
-        Ok(())
-    }
-
     fn read_service_template(service_name: &str) -> Result<String, ServiceManagerError> {
         let template_path = ROOT_DIR
             .join("services")
@@ -223,9 +188,9 @@ impl ServiceManager {
         }
     
         // Copy the binary to remote device
-        let ssh = Self::connect_ssh(&service.device)?;
-        Self::execute_ssh_command(&ssh, "sudo mkdir -p /opt/services")?;
-        Self::execute_ssh_command(&ssh, &format!("sudo chown {} /opt/services", service.device.config.username))?;
+        service.device.execute_command("sudo mkdir -p /opt/services")?;
+        service.device.execute_command(&format!("sudo chown {} /opt/services", service.device.config.username))?;
+
         let binary_path = ROOT_DIR.join("targets")
             .join(&service.device.config.arch)
             .join(format!("{}_service", service.name))
@@ -255,18 +220,18 @@ impl ServiceManager {
                 "Failed to copy binary to remote device".to_string()
             ));
         }
-        Self::execute_ssh_command(&ssh, &format!("chmod 755 {}", remote_path))?;
-        Self::execute_ssh_command(&ssh, &format!("test -f {}", remote_path))?;
+        service.device.execute_command(&format!("chmod 755 {}", remote_path))?;
+        service.device.execute_command(&format!("test -f {}", remote_path))?;
 
         // Copy CA certificate to remote device
         let local_ca_cert_dir = env::var("SM_MOSQUITTO_DIR").expect("SM_MOSQUITTO_DIR not set");
         let local_ca_cert_path = format!("{}/ca.crt", local_ca_cert_dir);
         let remote_ca_dir = env::var("SERVICES_CA_DIR").expect("SERVICES_CA_DIR not set");
         let remote_ca_path = format!("{}/ca.crt", remote_ca_dir);
-        Self::execute_ssh_command(&ssh, &format!("sudo rm -rf {}", remote_ca_dir))?;
-        Self::execute_ssh_command(&ssh, &format!("sudo mkdir -p {}", remote_ca_dir))?;
-        Self::execute_ssh_command(&ssh, &format!("sudo chown {} {}", service.device.config.username, remote_ca_dir))?;
-        Self::execute_ssh_command(&ssh, &format!("sudo chmod 700 {}", remote_ca_dir))?;
+        service.device.execute_command(&format!("sudo rm -rf {}", remote_ca_dir))?;
+        service.device.execute_command(&format!("sudo mkdir -p {}", remote_ca_dir))?;
+        service.device.execute_command(&format!("sudo chown {} {}", service.device.config.username, remote_ca_dir))?;
+        service.device.execute_command(&format!("sudo chmod 700 {}", remote_ca_dir))?;
 
         let status = Command::new("sshpass")
             .args([
@@ -286,12 +251,12 @@ impl ServiceManager {
                 "Failed to copy CA certificate".to_string()
             ));
         }
-        Self::execute_ssh_command(&ssh, &format!("sudo chown {} {}", service.device.config.username, remote_ca_path))?;
-        Self::execute_ssh_command(&ssh, &format!("sudo chmod 644 {}", remote_ca_path))?;
+        service.device.execute_command(&format!("sudo chown {} {}", service.device.config.username, remote_ca_path))?;
+        service.device.execute_command(&format!("sudo chmod 644 {}", remote_ca_path))?;
 
         // First disable and unmask the service if it exists
         info!("Cleaning up existing service state");
-        Self::execute_ssh_command(&ssh, &format!(
+        service.device.execute_command(&format!(
             "sudo systemctl disable {} || true; \
             sudo systemctl unmask {} || true; \
             sudo rm -f /etc/systemd/system/{}",
@@ -299,13 +264,13 @@ impl ServiceManager {
         ))?;
 
         let service_content = Self::create_service_file(service)?;
-        Self::execute_ssh_command(&ssh, &format!(
+        service.device.execute_command(&format!(
             "echo '{}' | sudo tee /etc/systemd/system/{}.service",
             service_content, service.name
         ))?;
         
-        Self::execute_ssh_command(&ssh, "sudo systemctl daemon-reload")?;
-        // Self::execute_ssh_command(&ssh, &format!("sudo systemctl enable {}", service.name))?;
+        service.device.execute_command("sudo systemctl daemon-reload")?;
+        // service.device.execute_command(&format!("sudo systemctl enable {}", service.name))?;
     
         println!("Service {} deployed successfully", service.name);
         service.status = ServiceStatus::Deployed;
@@ -325,8 +290,7 @@ impl ServiceManager {
             ));
         }
 
-        let ssh = Self::connect_ssh(&service.device)?;
-        Self::execute_ssh_command(&ssh, &format!("sudo systemctl start {}", service.name))?;
+        service.device.execute_command(&format!("sudo systemctl start {}", service.name))?;
         println!("Service {} started successfully", service.name);
         service.status = ServiceStatus::Running;
 
@@ -348,8 +312,7 @@ impl ServiceManager {
             ));
         }
 
-        let ssh = Self::connect_ssh(&service.device)?;
-        Self::execute_ssh_command(&ssh, &format!("sudo systemctl stop {}", service.name))?;
+        service.device.execute_command(&format!("sudo systemctl stop {}", service.name))?;
         println!("Service {} stopped successfully", service.name);
         service.status = ServiceStatus::Stopped;
         Ok(())

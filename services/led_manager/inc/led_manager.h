@@ -17,7 +17,6 @@ using json = nlohmann::json;
 class LEDManager : public virtual mqtt::callback {
 private:
     std::atomic<bool> running{true};
-    
     std::vector<BLEDeviceConfig> device_configs;
     std::unique_ptr<SimpleBLE::Adapter> adapter;
     
@@ -43,6 +42,7 @@ private:
     void InitializeMqttConnection();
     void InitAdapter();
     void FindAndInitDevices(std::vector<BLEDeviceConfig>& dc);
+    void FindAndInitDevice(BLEDeviceConfig& config);
     void PublishStatus();
     void HandleCommand(const json& command);
 
@@ -56,6 +56,8 @@ private:
     const std::string LED_STATE_TOPIC_PREFIX = "home/devices/leds/";
 
     // Command handlers
+    void ReconnectDevices();
+    void ReinitDevices();
     void TurnOnAll();
     void TurnOffAll();
     void SetColor(int r, int g, int b);

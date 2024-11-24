@@ -4,8 +4,10 @@
 - [ ] Design a common interface for all devices/services
 - [ ] What can I use the LLM for?
 - [ ] Add MQTT client to control LEDs from web interface
-- [ ] Maybe new build system?
+- [X] Maybe new build system?
 - [ ] Stream logs from remote devices to web interface
+- [X] Remove multiple SSH connections in service.rs
+- [X] Solve LED re-connection issues
 
 # Command Parser and Executor (PocketSphinx)
 * Simple ON/OFF and color change commands working via bluetooth
