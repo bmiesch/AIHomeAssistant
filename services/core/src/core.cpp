@@ -9,13 +9,13 @@ using json = nlohmann::json;
 
 
 Core::Core(const std::string& broker_address, const std::string& client_id) 
-    : audio_capture(std::make_unique<AudioCapture>()),
-      keyword_detector(std::make_unique<KeywordDetector>()),
-      mqtt_client(broker_address, client_id) {
+    : audio_capture_(std::make_unique<AudioCapture>()),
+      keyword_detector_(std::make_unique<KeywordDetector>()),
+      mqtt_client_(broker_address, client_id) {
     
     try {
         InitializeMqttConnection();
-        mqtt_client.set_callback(*this);
+        mqtt_client_.set_callback(*this);
         INFO_LOG("Core initialized with broker: " + broker_address + ", client_id: " + client_id);
     }
     catch (const std::exception& e) {
@@ -30,10 +30,10 @@ Core::~Core() {
 }
 
 void Core::AudioCaptureLoop() {
-    while(running) {
+    while(running_) {
         try {
-            auto buffer = audio_capture->CaptureAudio(1000);
-            if (!running) break;
+            auto buffer = audio_capture_->CaptureAudio(1000);
+            if (!running_) break;
             
             if (buffer.empty()) {
                 WARN_LOG("Received empty buffer from audio capture");
@@ -41,16 +41,16 @@ void Core::AudioCaptureLoop() {
             }
             
             {
-                std::lock_guard<std::mutex> lock(audio_queue_mutex);
-                if (audio_queue.size() > 5) {
-                    WARN_LOG("Audio queue overflow: " + std::to_string(audio_queue.size()) + " buffers");
-                    while (audio_queue.size() > 3) {
-                        audio_queue.pop();
+                std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+                if (audio_queue_.size() > 5) {
+                    WARN_LOG("Audio queue overflow: " + std::to_string(audio_queue_.size()) + " buffers");
+                    while (audio_queue_.size() > 3) {
+                        audio_queue_.pop();
                     }
                 }
-                audio_queue.push(std::move(buffer));
+                audio_queue_.push(std::move(buffer));
             }
-            audio_queue_cv.notify_one();
+            audio_queue_cv_.notify_one();
         } catch (const std::exception& e) {
             ERROR_LOG("Exception in audio capture: " + std::string(e.what()));
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -60,46 +60,46 @@ void Core::AudioCaptureLoop() {
 
 
 void Core::AudioProcessingLoop() {
-    while(running) {
+    while(running_) {
         std::vector<int16_t> buffer;
         {
-            std::unique_lock<std::mutex> lock(audio_queue_mutex);
-            audio_queue_cv.wait(lock, [this] { return !audio_queue.empty() || !running; });
-            if (!running) break;
-            buffer = std::move(audio_queue.front());
-            audio_queue.pop();
+            std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+            audio_queue_cv_.wait(lock, [this] { return !audio_queue_.empty() || !running_; });
+            if (!running_) break;
+            buffer = std::move(audio_queue_.front());
+            audio_queue_.pop();
         }
 
-        if (running && keyword_detector->DetectKeyword(buffer, true)) {
-            if (!running) break;
+        if (running_ && keyword_detector_->DetectKeyword(buffer, true)) {
+            if (!running_) break;
             
             // Clear any backlogged audio before starting command collection
             {
-                std::lock_guard<std::mutex> lock(audio_queue_mutex);
+                std::lock_guard<std::mutex> lock(audio_queue_mutex_);
                 std::queue<std::vector<int16_t>> empty;
-                std::swap(audio_queue, empty);
+                std::swap(audio_queue_, empty);
             }
             INFO_LOG("Keyword detected! Listening for command...");
             
             // Collect audio for 5 seconds (5 buffers of 1000ms each)
             std::vector<int16_t> command_buffer;
             for (int i = 0; i < 5; ++i) {
-                std::unique_lock<std::mutex> lock(audio_queue_mutex);
+                std::unique_lock<std::mutex> lock(audio_queue_mutex_);
                 // Wait for audio data to be available in the queue or for the running flag to be false
-                audio_queue_cv.wait(lock, [this] {return !audio_queue.empty() || !running; });
-                if (!running) break;
-                if (audio_queue.empty()) {
+                audio_queue_cv_.wait(lock, [this] {return !audio_queue_.empty() || !running_; });
+                if (!running_) break;
+                if (audio_queue_.empty()) {
                     WARN_LOG("Missed audio buffer during command collection");
                     continue;
                 }
-                auto next_buffer = std::move(audio_queue.front());
-                audio_queue.pop();
+                auto next_buffer = std::move(audio_queue_.front());
+                audio_queue_.pop();
                 command_buffer.insert(command_buffer.end(), next_buffer.begin(), next_buffer.end());
             }
 
-            if (!running) break;
-            Command cmd = keyword_detector->DetectCommand(command_buffer, true);
-            if (!running) break;
+            if (!running_) break;
+            Command cmd = keyword_detector_->DetectCommand(command_buffer, true);
+            if (!running_) break;
 
             switch(cmd) {
                 case Command::TURN_ON:
@@ -122,7 +122,7 @@ void Core::AudioProcessingLoop() {
 void Core::Initialize() {
     try {
         INFO_LOG("Connecting to MQTT broker...");
-        mqtt::token_ptr conntok = mqtt_client.connect(mqtt_conn_opts);
+        mqtt::token_ptr conntok = mqtt_client_.connect(mqtt_conn_opts_);
         conntok->wait();
     } catch (const mqtt::exception& e) {
         ERROR_LOG("MQTT connection error: " + std::string(e.what()));
@@ -130,23 +130,23 @@ void Core::Initialize() {
     }
 
     INFO_LOG("Starting main worker thread");
-    worker_thread = std::thread(&Core::Run, this);
+    worker_thread_ = std::thread(&Core::Run, this);
 }
 
 void Core::Run() {
-    running = true;
+    running_ = true;
     INFO_LOG("Starting Core threads");
 
     INFO_LOG("Starting audio capture thread");
-    audio_thread = std::thread(&Core::AudioCaptureLoop, this);
+    audio_thread_ = std::thread(&Core::AudioCaptureLoop, this);
 
     INFO_LOG("Starting audio processing thread");
-    audio_processing_thread = std::thread(&Core::AudioProcessingLoop, this);
+    audio_processing_thread_ = std::thread(&Core::AudioProcessingLoop, this);
 
     auto last_status_time = std::chrono::steady_clock::now();
     const auto status_interval = std::chrono::seconds(5);
 
-    while (running) {
+    while (running_) {
 
         auto now = std::chrono::steady_clock::now();
         if (now - last_status_time >= status_interval) {
@@ -160,23 +160,23 @@ void Core::Run() {
 
 void Core::Stop() {
     INFO_LOG("Stopping Core");
-    running = false;
+    running_ = false;
 
     // Clear any pending audio data
     {
-        std::lock_guard<std::mutex> lock(audio_queue_mutex);
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
         std::queue<std::vector<int16_t>> empty;
-        std::swap(audio_queue, empty);
+        std::swap(audio_queue_, empty);
     }
-    audio_queue_cv.notify_all();
+    audio_queue_cv_.notify_all();
     
-    if (audio_processing_thread.joinable()) audio_processing_thread.join();
-    if (audio_thread.joinable()) audio_thread.join();
-    if (worker_thread.joinable()) worker_thread.join();
+    if (audio_processing_thread_.joinable()) audio_processing_thread_.join();
+    if (audio_thread_.joinable()) audio_thread_.join();
+    if (worker_thread_.joinable()) worker_thread_.join();
 
     try {
-        mqtt_client.publish(STATUS_TOPIC, "{\"status\": \"offline\"}", 1, false);
-        mqtt_client.disconnect()->wait();
+        mqtt_client_.publish(STATUS_TOPIC, "{\"status\": \"offline\"}", 1, false);
+        mqtt_client_.disconnect()->wait();
         DEBUG_LOG("MQTT client disconnected");
     }
     catch (const mqtt::exception& e) {
@@ -210,19 +210,19 @@ void Core::InitializeMqttConnection() {
     mqtt::will_options will_opts(STATUS_TOPIC, mqtt::binary_ref("offline"), 1, false);
 
     try {
-        mqtt_ssl_opts = mqtt::ssl_options_builder()
+        mqtt_ssl_opts_ = mqtt::ssl_options_builder()
             .trust_store(ca_path)
             .enable_server_cert_auth(true)
             .finalize();
 
-        mqtt_conn_opts = mqtt::connect_options_builder()
+        mqtt_conn_opts_ = mqtt::connect_options_builder()
             .keep_alive_interval(std::chrono::seconds(20))
             .clean_session(true)
             .automatic_reconnect(true)
             .user_name(username)
             .password(password)
             .will(will_opts)
-            .ssl(mqtt_ssl_opts)
+            .ssl(mqtt_ssl_opts_)
             .finalize();
     }
     catch (const mqtt::exception& e) {
@@ -239,7 +239,7 @@ void Core::PublishLEDManagerCommand(const std::string& command, const json& para
 
     DEBUG_LOG("Publishing command: " + command + " to topic: " + topic);
     try {
-        mqtt_client.publish(topic, payload, 1, false)->wait_for(std::chrono::seconds(10));
+        mqtt_client_.publish(topic, payload, 1, false)->wait_for(std::chrono::seconds(10));
     } catch (const mqtt::exception& e) {
         ERROR_LOG("Error publishing command: " + std::string(e.what()));
         throw;
@@ -253,7 +253,7 @@ void Core::HandleServiceStatus(const std::string& topic, const std::string& payl
 
 void Core::PublishStatus() {
     try {
-        mqtt_client.publish(STATUS_TOPIC, R"({"status":"online"})", 1, false);
+        mqtt_client_.publish(STATUS_TOPIC, R"({"status":"online"})", 1, false);
     } catch (const mqtt::exception& e) {
         ERROR_LOG("Error publishing status: " + std::string(e.what()));
     }
@@ -269,7 +269,7 @@ void Core::PublishStatus() {
  */
 void Core::connected(const std::string& cause) {
     INFO_LOG("Connected to MQTT broker: " + cause);
-    mqtt_client.subscribe("home/devices/#", 0);
+    mqtt_client_.subscribe("home/devices/#", 0);
 }
 
 void Core::connection_lost(const std::string& cause) {

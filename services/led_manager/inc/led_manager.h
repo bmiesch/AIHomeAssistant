@@ -16,19 +16,19 @@ using json = nlohmann::json;
 
 class LEDManager : public virtual mqtt::callback {
 private:
-    std::atomic<bool> running{true};
-    std::vector<BLEDeviceConfig> device_configs;
-    std::unique_ptr<SimpleBLE::Adapter> adapter;
+    std::atomic<bool> running_{true};
+    std::vector<BLEDeviceConfig> device_configs_;
+    std::unique_ptr<SimpleBLE::Adapter> adapter_;
     
-    std::mutex devices_mutex;
-    std::vector<std::unique_ptr<BLEDevice>> devices;
+    std::mutex devices_mutex_;
+    std::vector<std::unique_ptr<BLEDevice>> devices_;
 
-    std::mutex cmd_queue_mutex;
-    std::condition_variable cmd_queue_cv;
-    std::queue<json> cmd_queue;
+    std::mutex cmd_queue_mutex_;
+    std::condition_variable cmd_queue_cv_;
+    std::queue<json> cmd_queue_;
 
     using CommandHandler = std::function<void(const json&)>;
-    std::unordered_map<std::string, CommandHandler> command_handlers = {
+    std::unordered_map<std::string, CommandHandler> command_handlers_ = {
         {"turn_on",  [this](const json&) { TurnOnAll(); }},
         {"turn_off", [this](const json&) { TurnOffAll(); }},
         {"set_color", [this](const json& payload) { 
@@ -46,9 +46,9 @@ private:
     void PublishStatus();
     void HandleCommand(const json& command);
 
-    mqtt::async_client mqtt_client;
-    mqtt::ssl_options mqtt_ssl_opts;
-    mqtt::connect_options mqtt_conn_opts;
+    mqtt::async_client mqtt_client_;
+    mqtt::ssl_options mqtt_ssl_opts_;
+    mqtt::connect_options mqtt_conn_opts_;
     
     // MQTT topics
     const std::string COMMAND_TOPIC = "home/services/led_manager/command";
@@ -68,7 +68,7 @@ private:
     void message_arrived(mqtt::const_message_ptr msg) override;
     void delivery_complete(mqtt::delivery_token_ptr token) override;
 
-    std::thread worker_thread;
+    std::thread worker_thread_;
     void Run();
 
 public:

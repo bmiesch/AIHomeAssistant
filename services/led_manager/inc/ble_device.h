@@ -7,17 +7,17 @@
 
 
 struct BLEDeviceConfig {
-    std::string address;
-    SimpleBLE::BluetoothUUID serv_uuid;
-    SimpleBLE::BluetoothUUID char_uuid;
+    std::string address_;
+    SimpleBLE::BluetoothUUID serv_uuid_;
+    SimpleBLE::BluetoothUUID char_uuid_;
 };
 
 class BLEDevice {
 private:
-    std::unique_ptr<SimpleBLE::Peripheral> peripheral;
-    std::string address;
-    SimpleBLE::BluetoothUUID serv_uuid;
-    SimpleBLE::BluetoothUUID char_uuid;
+    std::unique_ptr<SimpleBLE::Peripheral> peripheral_;
+    std::string address_;
+    SimpleBLE::BluetoothUUID serv_uuid_;
+    SimpleBLE::BluetoothUUID char_uuid_;
 
 public:
     BLEDevice(std::unique_ptr<SimpleBLE::Peripheral> p, std::string addr,

@@ -15,20 +15,20 @@ using json = nlohmann::json;
 
 class Core : public virtual mqtt::callback {
 private:
-    std::unique_ptr<AudioCapture> audio_capture;
-    std::unique_ptr<KeywordDetector> keyword_detector;
+    std::unique_ptr<AudioCapture> audio_capture_;
+    std::unique_ptr<KeywordDetector> keyword_detector_;
     
-    std::atomic<bool> running{true};
-    std::thread audio_thread;
-    std::thread audio_processing_thread;
+    std::atomic<bool> running_{true};
+    std::thread audio_thread_;
+    std::thread audio_processing_thread_;
 
-    std::queue<std::vector<int16_t>> audio_queue;
-    std::mutex audio_queue_mutex;
-    std::condition_variable audio_queue_cv;
+    std::queue<std::vector<int16_t>> audio_queue_;
+    std::mutex audio_queue_mutex_;
+    std::condition_variable audio_queue_cv_;
 
-    mqtt::async_client mqtt_client;
-    mqtt::ssl_options mqtt_ssl_opts;
-    mqtt::connect_options mqtt_conn_opts;
+    mqtt::async_client mqtt_client_;
+    mqtt::ssl_options mqtt_ssl_opts_;
+    mqtt::connect_options mqtt_conn_opts_;
 
     void AudioCaptureLoop();
     void AudioProcessingLoop();
@@ -47,7 +47,7 @@ private:
     void HandleServiceStatus(const std::string& topic, const std::string& payload);
     void PublishStatus();
 
-    std::thread worker_thread;
+    std::thread worker_thread_;
     void Run();
 
 public:
