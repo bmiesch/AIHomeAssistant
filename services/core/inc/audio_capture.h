@@ -12,11 +12,11 @@ enum class AudioMode {
 
 class AudioCapture {
 private:
-    snd_pcm_t *audio_capture_device;
-    unsigned int sample_rate;
-    unsigned int channels;
-    snd_pcm_format_t format;
-    snd_pcm_hw_params_t *params;
+    snd_pcm_t *audio_capture_device_;
+    unsigned int sample_rate_;
+    unsigned int channels_;
+    snd_pcm_format_t format_;
+    snd_pcm_hw_params_t *params_;
 
     void InitParams();
     void PrintCurrentParameters();

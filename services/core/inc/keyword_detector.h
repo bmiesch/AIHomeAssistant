@@ -14,10 +14,10 @@ enum class Command {
 
 class KeywordDetector {
 private:
-    std::unique_ptr<ps_config_t, decltype(&ps_config_free)> config;
-    std::unique_ptr<ps_config_t, decltype(&ps_config_free)> kws_config;
-    std::unique_ptr<ps_config_t, decltype(&ps_config_free)> jsgf_config;
-    std::unique_ptr<ps_decoder_t, decltype(&ps_free)> ps;
+    std::unique_ptr<ps_config_t, decltype(&ps_config_free)> config_;
+    std::unique_ptr<ps_config_t, decltype(&ps_config_free)> kws_config_;
+    std::unique_ptr<ps_config_t, decltype(&ps_config_free)> jsgf_config_;
+    std::unique_ptr<ps_decoder_t, decltype(&ps_free)> ps_;
 
     void InitConfig(const std::string& hmm_path);
 
