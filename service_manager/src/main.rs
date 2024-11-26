@@ -3,6 +3,7 @@ mod error;
 mod service;
 mod api;
 mod websocket;
+mod mqtt_client;
 
 use service::ServiceManager;
 use websocket::WebSocketServer;
@@ -22,7 +23,6 @@ fn start_mqtt_broker() -> Result<(), io::Error> {
 
     match env::consts::OS {
         "macos" => {
-            // Check if Mosquitto is already running
             let status_output = Command::new("brew")
                 .args(["services", "list"])
                 .output()?;
