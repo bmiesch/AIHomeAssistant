@@ -19,6 +19,12 @@ pub struct CreateServiceRequest {
     pub device_name: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct PublishMessageRequest {
+    pub topic: String,
+    pub payload: String,
+}
+
 // API client functions
 mod api {
     use super::*;
@@ -81,6 +87,214 @@ mod api {
             .send()
             .await?;
         Ok(())
+    }
+
+    pub async fn publish_mqtt(topic: &str, payload: &str) -> Result<(), reqwest::Error> {
+        reqwest::Client::new()
+            .post(&format!("{}/mqtt/publish", API_BASE))
+            .json(&PublishMessageRequest {
+                topic: topic.to_string(),
+                payload: payload.to_string(),
+            })
+            .send()
+            .await?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+struct KeyValuePair {
+    key: RwSignal<String>,
+    value: RwSignal<String>,
+}
+
+#[component]
+fn MqttPublisher() -> impl IntoView {
+    let (topic, set_topic) = create_signal(String::new());
+    let (pairs, set_pairs) = create_signal(vec![KeyValuePair { 
+        key: create_rw_signal(String::new()),
+        value: create_rw_signal(String::new()),
+    }]);
+    let (status, set_status) = create_signal(Option::<String>::None);
+
+    let add_pair = move |_| {
+        set_pairs.update(|pairs| {
+            pairs.push(KeyValuePair { 
+                key: create_rw_signal(String::new()),
+                value: create_rw_signal(String::new()),
+            });
+        });
+    };
+
+    let remove_pair = move |index: usize| {
+        set_pairs.update(|pairs| {
+            pairs.remove(index);
+            if pairs.is_empty() {
+                pairs.push(KeyValuePair { 
+                    key: create_rw_signal(String::new()),
+                    value: create_rw_signal(String::new()),
+                });
+            }
+        });
+    };
+
+    let publish = create_action(move |_| {
+        let topic = topic.get();
+        let payload = {
+            let mut map = serde_json::Map::new();
+            for pair in pairs.get().iter() {
+                if !pair.key.get().is_empty() {
+                    map.insert(
+                        pair.key.get(),
+                        serde_json::Value::String(pair.value.get())
+                    );
+                }
+            }
+            serde_json::Value::Object(map).to_string()
+        };
+
+        async move {
+            match api::publish_mqtt(&topic, &payload).await {
+                Ok(_) => {
+                    set_status.set(Some("Message published successfully".to_string()));
+                    set_timeout(
+                        move || set_status.set(None),
+                        std::time::Duration::from_secs(3)
+                    );
+                    Ok(())
+                },
+                Err(e) => {
+                    set_status.set(Some(format!("Error: {}", e)));
+                    Err(e)
+                }
+            }
+        }
+    });
+
+    view! {
+        <div class="bg-white rounded-lg shadow p-4">
+            <h2 class="text-lg font-semibold mb-4">"MQTT Publisher"</h2>
+            
+            <form
+                class="space-y-4"
+                on:submit=move |ev| {
+                    ev.prevent_default();
+                    publish.dispatch(());
+                }
+            >
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">"Topic"</label>
+                    <input
+                        type="text"
+                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        required
+                        placeholder="device/command"
+                        prop:value=move || topic.get()
+                        on:input=move |ev| {
+                            set_topic.set(event_target_value(&ev));
+                        }
+                    />
+                    <p class="mt-1 text-sm text-gray-500">
+                        "Example topics: device/speed/set, sensor/temperature"
+                    </p>
+                </div>
+
+                <div class="space-y-2">
+                    <label class="block text-sm font-medium text-gray-700">"Message Content"</label>
+                    
+                    <div class="space-y-2">
+                        {move || pairs.get().into_iter().enumerate().map(|(index, pair)| {
+                            view! {
+                                <div class="flex gap-2 items-start">
+                                    <div class="flex-1">
+                                        <input
+                                            type="text"
+                                            class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                            placeholder="Key"
+                                            prop:value=move || pair.key.get()
+                                            on:input=move |ev| {
+                                                pair.key.set(event_target_value(&ev));
+                                            }
+                                        />
+                                    </div>
+                                    <div class="flex-1">
+                                        <input
+                                            type="text"
+                                            class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                            placeholder="Value"
+                                            prop:value=move || pair.value.get()
+                                            on:input=move |ev| {
+                                                pair.value.set(event_target_value(&ev));
+                                            }
+                                        />
+                                    </div>
+                                    <button
+                                        type="button"
+                                        class="px-2 py-1 text-sm text-red-600 hover:text-red-800"
+                                        on:click=move |_| remove_pair(index)
+                                        disabled=move || pairs.get().len() == 1
+                                    >
+                                        "✕"
+                                    </button>
+                                </div>
+                            }
+                        }).collect_view()}
+                    </div>
+
+                    <button
+                        type="button"
+                        class="mt-2 text-sm text-blue-600 hover:text-blue-800"
+                        on:click=add_pair
+                    >
+                        "+ Add Field"
+                    </button>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">"JSON Preview"</label>
+                    <pre class="mt-1 p-2 bg-gray-50 rounded-md text-sm font-mono overflow-x-auto">
+                        {move || {
+                            let mut map = serde_json::Map::new();
+                            for pair in pairs.get().iter() {
+                                if !pair.key.get().is_empty() {
+                                    map.insert(
+                                        pair.key.get(),
+                                        serde_json::Value::String(pair.value.get())
+                                    );
+                                }
+                            }
+                            serde_json::to_string_pretty(&serde_json::Value::Object(map))
+                                .unwrap_or_else(|_| "{}".to_string())
+                        }}
+                    </pre>
+                </div>
+
+                {move || status.get().map(|msg| {
+                    let msg_for_class = msg.clone();
+                    let msg_for_content = msg.clone();
+                    view! {
+                        <div class=move || {
+                            let base_classes = "mt-2 p-2 rounded text-sm";
+                            if msg_for_class.as_str().starts_with("Error") {
+                                format!("{} bg-red-100 text-red-700", base_classes)
+                            } else {
+                                format!("{} bg-green-100 text-green-700", base_classes)
+                            }
+                        }>
+                            {msg_for_content}
+                        </div>
+                    }
+                })}
+
+                <button
+                    type="submit"
+                    class="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+                    disabled=move || publish.pending().get()
+                >
+                    {move || if publish.pending().get() { "Publishing..." } else { "Publish Message" }}
+                </button>
+            </form>
+        </div>
     }
 }
 
@@ -301,15 +515,23 @@ fn App() -> impl IntoView {
     let refresh = create_action(move |_| async move {
         match api::fetch_services().await {
             Ok(new_services) => {
+                set_error.set(None);
                 set_services.update(|s| *s = new_services);
                 Ok(())
             }
             Err(e) => {
-                set_error.update(|err| *err = Some(e.to_string()));
+                // If status is None, it usually means we couldn't connect to the server
+                let error_msg = if e.status().is_none() {
+                    "Backend service is unavailable. Please check if the server is running.".to_string()
+                } else {
+                    e.to_string()
+                };
+                set_error.set(Some(error_msg));
                 Err(e)
             }
         }
     });
+
 
     // Initial load of services
     create_effect(move |_| {
@@ -350,6 +572,12 @@ fn App() -> impl IntoView {
 
             <div class="w-1/3 p-4">
                 <WebSocketComponent />
+            </div>
+
+            <div class="w-1/3 p-4">
+                <div class="mt-4">
+                    <MqttPublisher />
+                </div>
             </div>
         </div>
     }

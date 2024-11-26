@@ -3,6 +3,7 @@ use std::env;
 use tokio::sync::broadcast;
 use std::time::Duration;
 
+#[derive(Clone)]
 pub struct MQTTClient {
     client: paho_mqtt::AsyncClient,
 }
@@ -83,7 +84,7 @@ impl MQTTClient {
         Ok(())
     }
 
-    pub fn publish(self, msg: &Message) -> Result<(), paho_mqtt::Error> {
+    pub async fn publish(self, msg: &Message) -> Result<(), paho_mqtt::Error> {
         let publish_token = self.client.publish(msg.clone());
         publish_token.wait()?;
         Ok(())

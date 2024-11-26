@@ -4,6 +4,7 @@ use axum::{
     extract::{State, Path},
     Json,
 };
+use paho_mqtt::Message;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -22,6 +23,12 @@ pub struct ServiceResponse {
     name: String,
     status: String,
     device: String,
+}
+
+#[derive(Deserialize)]
+pub struct PublishMessageRequest {
+    topic: String,
+    payload: String,
 }
 
 
@@ -55,6 +62,7 @@ pub fn create_router(service_manager: ServiceManager) -> Router {
         .route("/services/:name/deploy", post(deploy_service))
         .route("/services/:name/start", post(start_service))
         .route("/services/:name/stop", post(stop_service))
+        .route("/mqtt/publish", post(publish_message))
         .with_state(shared_state)
         .layer(cors)
 }
@@ -133,4 +141,18 @@ async fn stop_service(
     let mut service_manager = state.lock().await;
     service_manager.stop_service(&name).await?;
     Ok(Json("Service stopped".to_string()))
+}
+
+/// Publish a message to any MQTT topic
+async fn publish_message(
+    State(state): State<SharedState>,
+    Json(req): Json<PublishMessageRequest>
+) -> Result<Json<String>, ServiceManagerError> {
+    let msg = Message::new(req.topic, req.payload, 0);
+    let mqtt_client = {
+        let service_manager = state.lock().await;
+        service_manager.mqtt_client.clone()
+    };
+    mqtt_client.publish(&msg).await?;
+    Ok(Json("Message published".to_string()))
 }
