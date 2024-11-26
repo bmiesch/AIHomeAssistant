@@ -35,7 +35,7 @@ pub struct Service {
 /// Manages the lifecycle of services across multiple devices
 pub struct ServiceManager {
     services: HashMap<String, Service>,
-    mqtt_client: MQTTClient,
+    pub mqtt_client: MQTTClient,
     devices: DeviceRegistry,
 }
 
