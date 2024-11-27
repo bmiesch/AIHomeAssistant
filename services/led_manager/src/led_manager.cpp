@@ -4,19 +4,14 @@
 
 using json = nlohmann::json;
 
-LEDManager::LEDManager(const std::vector<BLEDeviceConfig>& configs, const std::string& broker_address, const std::string& client_id)
-    : device_configs_(configs),
-      mqtt_client_(broker_address, client_id) {
+LEDManager::LEDManager(const std::vector<BLEDeviceConfig>& configs, const std::string& broker_address, const std::string& client_id,
+    const std::string& ca_path, const std::string& username, const std::string& password)
+    : PahoMqttClient(broker_address, client_id, ca_path, username, password),
+      device_configs_(configs) {
 
-    try {
-        InitializeMqttConnection();
-        mqtt_client_.set_callback(*this);
-        INFO_LOG("LEDManager initialized with broker: " + broker_address + ", client_id: " + client_id);
-    }
-    catch (const std::exception& e) {
-        ERROR_LOG("Failed to initialize LEDManager: " + std::string(e.what()));
-        throw;
-    }
+    SetMessageCallback([this](mqtt::const_message_ptr msg) {
+        this->IncomingMessage(msg->get_topic(), msg->to_string());
+    });
 }
 
 LEDManager::~LEDManager() {
@@ -25,16 +20,7 @@ LEDManager::~LEDManager() {
 }
 
 void LEDManager::Initialize() {
-    try {
-        INFO_LOG("Connecting to MQTT broker...");
-        mqtt::token_ptr conntok = mqtt_client_.connect(mqtt_conn_opts_);
-        conntok->wait();
-        mqtt_client_.subscribe(COMMAND_TOPIC, 1);
-        INFO_LOG("Successfully connected to MQTT broker");
-    } catch (const mqtt::exception& e) {
-        ERROR_LOG("Error connecting to MQTT broker: " + std::string(e.what()));
-        throw;
-    }
+    Connect();
 
     INFO_LOG("Starting main worker thread");
     worker_thread_ = std::thread(&LEDManager::Run, this);
@@ -87,7 +73,12 @@ void LEDManager::Run() {
         // Publish heartbeat status
         now = std::chrono::steady_clock::now();
         if (now - last_status_time >= status_interval) {
-            PublishStatus();
+            try {
+                nlohmann::json status_msg = {{"status", "offline"}};
+                Publish(STATUS_TOPIC, status_msg);
+            } catch (const std::exception& e) {
+                ERROR_LOG("Exception in status update: " + std::string(e.what()));
+            }
             last_status_time = now;
         }
     }
@@ -110,57 +101,11 @@ void LEDManager::Stop() {
     }
     
     try {
-        mqtt_client_.publish(STATUS_TOPIC, "{\"status\": \"offline\"}", 1, false);
-        mqtt_client_.disconnect()->wait();
+        Publish(STATUS_TOPIC, "{\"status\": \"offline\"}");
+        Disconnect();
         DEBUG_LOG("MQTT client disconnected");
     } catch (const mqtt::exception& e) {
         ERROR_LOG("Error disconnecting from MQTT broker: " + std::string(e.what()));
-    }
-}
-
-void LEDManager::InitializeMqttConnection() {
-    auto getEnvVar = [](const char* name) -> std::string {
-        const char* value = std::getenv(name);
-        if (!value) {
-            throw std::runtime_error(std::string("Environment variable not set: ") + name);
-        }
-        return std::string(value);
-    };
-
-    const auto username = getEnvVar("MQTT_USERNAME");
-    const auto password = getEnvVar("MQTT_PASSWORD");
-    const auto ca_path = getEnvVar("MQTT_CA_DIR") + "/ca.crt";
-
-    // Test CA certificate file access
-    {
-        std::ifstream cert_file(ca_path);
-        if (!cert_file.good()) {
-            ERROR_LOG("Cannot read CA certificate at: " + ca_path);
-            throw std::runtime_error("CA certificate not readable");
-        }
-        INFO_LOG("Successfully opened CA certificate");
-    }
-
-    mqtt::will_options will_opts(STATUS_TOPIC, mqtt::binary_ref("offline"), 1, false);
-
-    try {
-        mqtt_ssl_opts_ = mqtt::ssl_options_builder()
-            .trust_store(ca_path)
-            .enable_server_cert_auth(true)
-            .finalize();
-
-        mqtt_conn_opts_ = mqtt::connect_options_builder()
-            .keep_alive_interval(std::chrono::seconds(20))
-            .clean_session(true)
-            .automatic_reconnect(true)
-            .user_name(username)
-            .password(password)
-            .will(will_opts)
-            .ssl(mqtt_ssl_opts_)
-            .finalize();
-    }
-    catch (const mqtt::exception& e) {
-        throw std::runtime_error("MQTT configuration failed: " + std::string(e.what()));
     }
 }
 
@@ -231,16 +176,10 @@ void LEDManager::FindAndInitDevice(BLEDeviceConfig& config) {
     WARN_LOG("Device not found: " + config.address_);
 }
 
-void LEDManager::PublishStatus() {
-    json status;
-    status["status"] = "online";
-    status["device_count"] = devices_.size();
-    
-    try {
-        DEBUG_LOG("Publishing status update");
-        mqtt_client_.publish(STATUS_TOPIC, status.dump(), 1, false);
-    } catch (const mqtt::exception& e) {
-        ERROR_LOG("Error publishing status: " + std::string(e.what()));
+void LEDManager::IncomingMessage(const std::string& topic, const std::string& payload) {
+    INFO_LOG("Received message on topic: " + topic + ", payload: " + payload);
+    if (topic.find("home/services/led_manager/command") == 0) {
+        HandleCommand(json::parse(payload));
     }
 }
 
@@ -304,43 +243,4 @@ void LEDManager::SetColor(int r, int g, int b) {
     for (auto& device : devices_) {
         device->SetColor(r, g, b);
     }
-}
-
-/*
- * MQTT Callback Functions
- * These functions override the virtual callbacks from mqtt::callback
- * - connected: Called when connection to broker is established
- * - connection_lost: Called when connection to broker is lost
- * - message_arrived: Called when a message is received on a subscribed topic
- * - delivery_complete: Called when a message publish is completed
- */
-void LEDManager::connected(const std::string& cause) {
-    INFO_LOG("Connected to MQTT broker: " + cause);
-    mqtt_client_.subscribe(COMMAND_TOPIC, 1);
-}
-
-void LEDManager::connection_lost(const std::string& cause) {
-    WARN_LOG("MQTT connection lost: " + cause);
-}
-
-void LEDManager::message_arrived(mqtt::const_message_ptr msg) {
-    if (msg->get_topic() == COMMAND_TOPIC) {
-        try {
-            DEBUG_LOG("Received message on command topic");
-            json payload = json::parse(msg->get_payload());
-            {
-                std::lock_guard<std::mutex> lock(cmd_queue_mutex_);
-                cmd_queue_.push(payload);
-            }
-            cmd_queue_cv_.notify_one();
-
-        } catch (const json::parse_error& e) {
-            ERROR_LOG("Error parsing command: " + std::string(e.what()));
-        }
-    }
-}
-
-void LEDManager::delivery_complete(mqtt::delivery_token_ptr token) {
-    (void)token;
-    DEBUG_LOG("MQTT message delivered");
 }

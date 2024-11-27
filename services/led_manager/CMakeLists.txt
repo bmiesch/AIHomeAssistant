@@ -5,6 +5,7 @@ include(ExternalProject)
 
 set(SERVICES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set(COMMON_DIR ${SERVICES_DIR}/common)
+set(INTERFACES_DIR ${SERVICES_DIR}/interfaces)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -61,6 +62,8 @@ list(APPEND CMAKE_PREFIX_PATH ${EXTERNAL_INSTALL_LOCATION})
 file(GLOB_RECURSE SOURCES
     src/*.cpp
     ${COMMON_DIR}/src/*.cpp
+    ${INTERFACES_DIR}/mqtt_interface/*.cpp
+    ${INTERFACES_DIR}/service_interface/*.cpp
 )
 
 # Create executable
@@ -78,6 +81,8 @@ target_include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/inc
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${COMMON_DIR}/inc
+        ${INTERFACES_DIR}/mqtt_interface
+        ${INTERFACES_DIR}/service_interface
         ${EXTERNAL_INSTALL_LOCATION}/include
         ${DBUS_INCLUDE_DIRS}
 )

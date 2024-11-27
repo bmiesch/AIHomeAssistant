@@ -93,10 +93,10 @@ echo "    && rm -rf /var/lib/apt/lists/*" >> "$DOCKER_FILE"
 # Add the service source and build it
 echo "# Build the service" >> "$DOCKER_FILE"
 echo "WORKDIR /build" >> "$DOCKER_FILE"
-echo "COPY services/${SERVICE_NAME} ." >> "$DOCKER_FILE"
-echo "COPY services/common ." >> "$DOCKER_FILE"
+echo "COPY services ." >> "$DOCKER_FILE"
 
 echo "RUN set -e \\" >> "$DOCKER_FILE"
+echo "    && cd ${SERVICE_NAME} \\" >> "$DOCKER_FILE"
 echo "    && cmake -B build -DCMAKE_BUILD_TYPE=$BUILD_TYPE \\" >> "$DOCKER_FILE"
 echo "    && cmake --build build" >> "$DOCKER_FILE"
 
@@ -114,7 +114,7 @@ docker rm "$TEMP_CONTAINER" 2>/dev/null || true
 
 # Copy the built binary out
 docker create --name "$TEMP_CONTAINER" "${SERVICE_NAME}-${ARCH}"
-docker cp "${TEMP_CONTAINER}:/build/build/${SERVICE_NAME}_service" "${TARGETS_DIR}/"
+docker cp "${TEMP_CONTAINER}:/build/${SERVICE_NAME}/build/${SERVICE_NAME}_service" "${TARGETS_DIR}/"
 docker rm "$TEMP_CONTAINER"
 
 echo "Build complete! Binary is in target/${ARCH}/${SERVICE_NAME}"

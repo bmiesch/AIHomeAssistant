@@ -8,20 +8,15 @@
 using json = nlohmann::json;
 
 
-Core::Core(const std::string& broker_address, const std::string& client_id) 
-    : audio_capture_(std::make_unique<AudioCapture>()),
-      keyword_detector_(std::make_unique<KeywordDetector>()),
-      mqtt_client_(broker_address, client_id) {
-    
-    try {
-        InitializeMqttConnection();
-        mqtt_client_.set_callback(*this);
-        INFO_LOG("Core initialized with broker: " + broker_address + ", client_id: " + client_id);
-    }
-    catch (const std::exception& e) {
-        ERROR_LOG("Failed to initialize Core: " + std::string(e.what()));
-        throw;
-    }
+Core::Core(const std::string& broker_address, const std::string& client_id, 
+    const std::string& ca_path, const std::string& username, const std::string& password) 
+    : PahoMqttClient(broker_address, client_id, ca_path, username, password),
+      audio_capture_(std::make_unique<AudioCapture>()),
+      keyword_detector_(std::make_unique<KeywordDetector>()) {
+
+    SetMessageCallback([this](mqtt::const_message_ptr msg) {
+        this->IncomingMessage(msg->get_topic(), msg->to_string());
+    });
 }
 
 Core::~Core() {
@@ -120,14 +115,7 @@ void Core::AudioProcessingLoop() {
 }
 
 void Core::Initialize() {
-    try {
-        INFO_LOG("Connecting to MQTT broker...");
-        mqtt::token_ptr conntok = mqtt_client_.connect(mqtt_conn_opts_);
-        conntok->wait();
-    } catch (const mqtt::exception& e) {
-        ERROR_LOG("MQTT connection error: " + std::string(e.what()));
-        throw;
-    }
+    Connect();
 
     INFO_LOG("Starting main worker thread");
     worker_thread_ = std::thread(&Core::Run, this);
@@ -150,7 +138,12 @@ void Core::Run() {
 
         auto now = std::chrono::steady_clock::now();
         if (now - last_status_time >= status_interval) {
-            PublishStatus();
+            try {
+                nlohmann::json status_msg = {{"status", "offline"}};
+                Publish(STATUS_TOPIC, status_msg);
+            } catch (const std::exception& e) {
+                ERROR_LOG("Exception in status update: " + std::string(e.what()));
+            }
             last_status_time = now;
         }
 
@@ -175,8 +168,9 @@ void Core::Stop() {
     if (worker_thread_.joinable()) worker_thread_.join();
 
     try {
-        mqtt_client_.publish(STATUS_TOPIC, "{\"status\": \"offline\"}", 1, false);
-        mqtt_client_.disconnect()->wait();
+        nlohmann::json status_msg = {{"status", "offline"}};
+        Publish(STATUS_TOPIC, status_msg);
+        Disconnect();
         DEBUG_LOG("MQTT client disconnected");
     }
     catch (const mqtt::exception& e) {
@@ -184,109 +178,23 @@ void Core::Stop() {
     }
 }
 
-void Core::InitializeMqttConnection() {
-    auto getEnvVar = [](const char* name) -> std::string {
-        const char* value = std::getenv(name);
-        if (!value) {
-            throw std::runtime_error(std::string("Environment variable not set: ") + name);
-        }
-        return std::string(value);
-    };
-
-    const auto username = getEnvVar("MQTT_USERNAME");
-    const auto password = getEnvVar("MQTT_PASSWORD");
-    const auto ca_path = getEnvVar("MQTT_CA_DIR") + "/ca.crt";
-
-    // Test CA certificate file access
-    {
-        std::ifstream cert_file(ca_path);
-        if (!cert_file.good()) {
-            ERROR_LOG("Cannot read CA certificate at: " + ca_path);
-            throw std::runtime_error("CA certificate not readable");
-        }
-        INFO_LOG("Successfully opened CA certificate");
-    }
-
-    mqtt::will_options will_opts(STATUS_TOPIC, mqtt::binary_ref("offline"), 1, false);
-
-    try {
-        mqtt_ssl_opts_ = mqtt::ssl_options_builder()
-            .trust_store(ca_path)
-            .enable_server_cert_auth(true)
-            .finalize();
-
-        mqtt_conn_opts_ = mqtt::connect_options_builder()
-            .keep_alive_interval(std::chrono::seconds(20))
-            .clean_session(true)
-            .automatic_reconnect(true)
-            .user_name(username)
-            .password(password)
-            .will(will_opts)
-            .ssl(mqtt_ssl_opts_)
-            .finalize();
-    }
-    catch (const mqtt::exception& e) {
-        throw std::runtime_error("MQTT configuration failed: " + std::string(e.what()));
+void Core::IncomingMessage(const std::string& topic, const std::string& payload) {
+    DEBUG_LOG("Message received - Topic: " + topic + ", Payload: " + payload);
+    if (topic.find("home/services/") == 0) {
+        HandleServiceStatus(topic, payload);
     }
 }
 
 void Core::PublishLEDManagerCommand(const std::string& command, const json& params) {
-    json message;
-    message["command"] = command;
-    message["params"] = params;
+    json message{{"command", command}, {"params", params}};
     std::string topic = "home/services/led_manager/command";
     std::string payload = message.dump();
 
     DEBUG_LOG("Publishing command: " + command + " to topic: " + topic);
-    try {
-        mqtt_client_.publish(topic, payload, 1, false)->wait_for(std::chrono::seconds(10));
-    } catch (const mqtt::exception& e) {
-        ERROR_LOG("Error publishing command: " + std::string(e.what()));
-        throw;
-    }
+    Publish(topic, payload);
 }
 
 void Core::HandleServiceStatus(const std::string& topic, const std::string& payload) {
     DEBUG_LOG("Service status update - Topic: " + topic + ", Payload: " + payload);
     // React to service status changes if necessary
-}
-
-void Core::PublishStatus() {
-    try {
-        mqtt_client_.publish(STATUS_TOPIC, R"({"status":"online"})", 1, false);
-    } catch (const mqtt::exception& e) {
-        ERROR_LOG("Error publishing status: " + std::string(e.what()));
-    }
-}
-
-/*
- * MQTT Callback Functions
- * These functions override the virtual callbacks from mqtt::callback
- * - connected: Called when connection to broker is established
- * - connection_lost: Called when connection to broker is lost
- * - message_arrived: Called when a message is received on a subscribed topic
- * - delivery_complete: Called when a message publish is completed
- */
-void Core::connected(const std::string& cause) {
-    INFO_LOG("Connected to MQTT broker: " + cause);
-    mqtt_client_.subscribe("home/devices/#", 0);
-}
-
-void Core::connection_lost(const std::string& cause) {
-    WARN_LOG("MQTT connection lost: " + cause);
-}
-
-void Core::message_arrived(mqtt::const_message_ptr msg) {
-    std::string topic = msg->get_topic();
-    std::string payload = msg->to_string();
-
-    DEBUG_LOG("Message received - Topic: " + topic + ", Payload: " + payload);
-    if (topic.find("home/services/") == 0) {
-        HandleServiceStatus(topic, payload);
-    }    
-}
-
-void Core::delivery_complete(mqtt::delivery_token_ptr token) {
-    (void)token;
-    DEBUG_LOG("MQTT message delivered");
 }
