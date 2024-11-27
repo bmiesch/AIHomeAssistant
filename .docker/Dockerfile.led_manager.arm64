@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 # Build the service
 WORKDIR /build
-COPY services/led_manager .
-COPY services/common .
+COPY services .
 RUN set -e \
+    && cd led_manager \
     && cmake -B build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build

@@ -23,8 +23,19 @@ int main() {
         return 1;
     }
 
+    auto getEnvVar = [](const char* name) -> std::string {
+        const char* value = std::getenv(name);
+        if (!value) {
+            throw std::runtime_error(std::string("Environment variable not set: ") + name);
+        }
+        return std::string(value);
+    };
+    const auto username = getEnvVar("MQTT_USERNAME");
+    const auto password = getEnvVar("MQTT_PASSWORD");
+    const auto ca_path = getEnvVar("MQTT_CA_DIR") + "/ca.crt";
+
     try {
-        Core core(broker_address, "core_client");
+        Core core(broker_address, "core_client", ca_path, username, password);
         core.Initialize();
 
         while(should_run) {
