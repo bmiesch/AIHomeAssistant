@@ -49,7 +49,7 @@ int main() {
     const auto ca_path = getEnvVar("MQTT_CA_DIR") + "/ca.crt";
 
     try {
-        LEDManager led_manager(device_configs, broker_address, "led_manager_client",
+        LEDManager led_manager(device_configs, broker_address, "led_manager",
             ca_path, username, password);
         led_manager.Initialize();
 

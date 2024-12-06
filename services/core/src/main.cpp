@@ -35,7 +35,7 @@ int main() {
     const auto ca_path = getEnvVar("MQTT_CA_DIR") + "/ca.crt";
 
     try {
-        Core core(broker_address, "core_client", ca_path, username, password);
+        Core core(broker_address, "core", ca_path, username, password);
         core.Initialize();
 
         while(should_run) {

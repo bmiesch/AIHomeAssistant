@@ -12,6 +12,9 @@ LEDManager::LEDManager(const std::vector<BLEDeviceConfig>& configs, const std::s
     SetMessageCallback([this](mqtt::const_message_ptr msg) {
         this->IncomingMessage(msg->get_topic(), msg->to_string());
     });
+
+    // Subscribe to topics
+    Subscribe(COMMAND_TOPIC);
 }
 
 LEDManager::~LEDManager() {
@@ -20,8 +23,6 @@ LEDManager::~LEDManager() {
 }
 
 void LEDManager::Initialize() {
-    Connect();
-
     INFO_LOG("Starting main worker thread");
     worker_thread_ = std::thread(&LEDManager::Run, this);
 }
@@ -74,7 +75,7 @@ void LEDManager::Run() {
         now = std::chrono::steady_clock::now();
         if (now - last_status_time >= status_interval) {
             try {
-                nlohmann::json status_msg = {{"status", "offline"}};
+                nlohmann::json status_msg = {{"status", "online"}};
                 Publish(STATUS_TOPIC, status_msg);
             } catch (const std::exception& e) {
                 ERROR_LOG("Exception in status update: " + std::string(e.what()));
