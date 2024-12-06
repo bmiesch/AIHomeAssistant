@@ -39,7 +39,15 @@ PahoMqttClient::PahoMqttClient(const std::string& broker_address, const std::str
 }
 
 void PahoMqttClient::Connect() {
-    mqtt_client_.connect(mqtt_conn_opts_);
+    try {
+        auto connToken = mqtt_client_.connect(mqtt_conn_opts_);
+        if (!connToken->wait_for(std::chrono::seconds(5))) {
+            throw std::runtime_error("Failed to connect to MQTT broker");
+        }
+    } catch (const mqtt::exception& exc) {
+        std::string error_msg = "Failed to connect to MQTT broker: " + std::string(exc.what());
+        ERROR_LOG(error_msg.c_str());
+    }
 }
 
 void PahoMqttClient::Disconnect() {
@@ -60,10 +68,12 @@ void PahoMqttClient::Publish(const std::string& topic, const nlohmann::json& pay
 
 void PahoMqttClient::Subscribe(const std::string& topic) {
     mqtt_client_.subscribe(topic, 1);
+    INFO_LOG("Subscribed to topic: " + topic);
 }
 
 void PahoMqttClient::SetMessageCallback(mqtt::async_client::message_handler callback) {
     message_callback_ = callback;
+    INFO_LOG("MQTT message callback set");
 }
 
 void PahoMqttClient::connected(const std::string& cause) {

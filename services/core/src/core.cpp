@@ -17,6 +17,9 @@ Core::Core(const std::string& broker_address, const std::string& client_id,
     SetMessageCallback([this](mqtt::const_message_ptr msg) {
         this->IncomingMessage(msg->get_topic(), msg->to_string());
     });
+
+    // Subscribe to topics
+    Subscribe(COMMAND_TOPIC);
 }
 
 Core::~Core() {
@@ -115,8 +118,6 @@ void Core::AudioProcessingLoop() {
 }
 
 void Core::Initialize() {
-    Connect();
-
     INFO_LOG("Starting main worker thread");
     worker_thread_ = std::thread(&Core::Run, this);
 }
@@ -139,7 +140,7 @@ void Core::Run() {
         auto now = std::chrono::steady_clock::now();
         if (now - last_status_time >= status_interval) {
             try {
-                nlohmann::json status_msg = {{"status", "offline"}};
+                nlohmann::json status_msg = {{"status", "online"}};
                 Publish(STATUS_TOPIC, status_msg);
             } catch (const std::exception& e) {
                 ERROR_LOG("Exception in status update: " + std::string(e.what()));
@@ -187,7 +188,7 @@ void Core::IncomingMessage(const std::string& topic, const std::string& payload)
 
 void Core::PublishLEDManagerCommand(const std::string& command, const json& params) {
     json message{{"command", command}, {"params", params}};
-    std::string topic = "home/services/led_manager/command";
+    std::string topic = LED_MANAGER_COMMAND_TOPIC;
     std::string payload = message.dump();
 
     DEBUG_LOG("Publishing command: " + command + " to topic: " + topic);

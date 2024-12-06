@@ -2,6 +2,7 @@ use paho_mqtt::{AsyncClient, CreateOptionsBuilder, ConnectOptionsBuilder, SslOpt
 use std::env;
 use tokio::sync::broadcast;
 use std::time::Duration;
+use tracing::info;
 
 #[derive(Clone)]
 pub struct MQTTClient {

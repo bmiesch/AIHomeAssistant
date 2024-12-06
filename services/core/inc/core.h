@@ -37,6 +37,8 @@ public:
 private:
     // Constants
     static constexpr const char* STATUS_TOPIC = "home/services/core/status";
+    static constexpr const char* COMMAND_TOPIC = "home/services/core/command"; // TODO: Implement
+    static constexpr const char* LED_MANAGER_COMMAND_TOPIC = "home/services/led_manager/command";
 
     // State
     std::atomic<bool> running_{true};
