@@ -90,31 +90,32 @@ done
 
 echo "    && rm -rf /var/lib/apt/lists/*" >> "$DOCKER_FILE"
 
-# Add the service source and build it
-echo "# Build the service" >> "$DOCKER_FILE"
+# Setup build environment
 echo "WORKDIR /build" >> "$DOCKER_FILE"
-echo "COPY services ." >> "$DOCKER_FILE"
 
-echo "RUN set -e \\" >> "$DOCKER_FILE"
-echo "    && cd ${SERVICE_NAME} \\" >> "$DOCKER_FILE"
-echo "    && cmake -B build -DCMAKE_BUILD_TYPE=$BUILD_TYPE \\" >> "$DOCKER_FILE"
-echo "    && cmake --build build" >> "$DOCKER_FILE"
+# Copy CMakeLists.txt first to leverage layer caching
+echo "COPY services/${SERVICE_NAME}/CMakeLists.txt services/${SERVICE_NAME}/" >> "$DOCKER_FILE"
+
+# Copy all source and build
+echo "COPY services services" >> "$DOCKER_FILE"
+echo "RUN cd services/${SERVICE_NAME} && \\" >> "$DOCKER_FILE"
+echo "    cmake -B build -DCMAKE_BUILD_TYPE=$BUILD_TYPE && \\" >> "$DOCKER_FILE"
+echo "    cmake --build build" >> "$DOCKER_FILE"
 
 # Build the image and run the container
-if ! docker build -t "${SERVICE_NAME}-${ARCH}" -f "$DOCKER_FILE" .; then
+if ! docker build \
+    --build-arg BUILDKIT_INLINE_CACHE=1 \
+    --cache-from="${SERVICE_NAME}-${ARCH}" \
+    -t "${SERVICE_NAME}-${ARCH}" \
+    -f "$DOCKER_FILE" .; then
     echo "Docker build failed!"
     exit 1
 fi
 
-# Generate a unique temporary container name
-TEMP_CONTAINER="${SERVICE_NAME}-${ARCH}-container"
+CONTAINER_NAME="${SERVICE_NAME}-${ARCH}-container"
+if ! docker ps -a | grep -q ${CONTAINER_NAME}; then
+    docker create --name "${CONTAINER_NAME}" "${SERVICE_NAME}-${ARCH}"
+fi
 
-# Remove existing container if it exists
-docker rm "$TEMP_CONTAINER" 2>/dev/null || true
-
-# Copy the built binary out
-docker create --name "$TEMP_CONTAINER" "${SERVICE_NAME}-${ARCH}"
-docker cp "${TEMP_CONTAINER}:/build/${SERVICE_NAME}/build/${SERVICE_NAME}_service" "${TARGETS_DIR}/"
-docker rm "$TEMP_CONTAINER"
-
+docker cp "${CONTAINER_NAME}:/build/services/${SERVICE_NAME}/build/${SERVICE_NAME}_service" "${TARGETS_DIR}/"
 echo "Build complete! Binary is in target/${ARCH}/${SERVICE_NAME}"

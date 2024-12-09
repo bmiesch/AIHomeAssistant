@@ -1,3 +1,10 @@
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "${CCACHE_PROGRAM}")
+    message(STATUS "Using ccache: ${CCACHE_PROGRAM}")
+endif()
+
 cmake_minimum_required(VERSION 3.10)
 project(core_service)
 
@@ -12,8 +19,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Enable debug symbols and disable optimization (matching your Makefile)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic -g -O0")
+# Add build type configuration
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build" FORCE)
+endif()
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+
+# Modify compiler flags to be configuration-specific
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic")
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
@@ -28,6 +41,7 @@ set(EXTERNAL_INSTALL_LOCATION ${CMAKE_BINARY_DIR}/external)
 ExternalProject_Add(pocketsphinx_external
     GIT_REPOSITORY https://github.com/cmusphinx/pocketsphinx.git
     GIT_TAG master
+    GIT_SHALLOW ON
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${EXTERNAL_INSTALL_LOCATION}
     BUILD_COMMAND
@@ -40,6 +54,7 @@ ExternalProject_Add(pocketsphinx_external
 ExternalProject_Add(paho-mqtt-cpp
     GIT_REPOSITORY https://github.com/eclipse/paho.mqtt.cpp.git
     GIT_TAG v1.4.0
+    GIT_SHALLOW ON
     UPDATE_COMMAND
         git submodule init && git submodule update
     CMAKE_ARGS
@@ -51,6 +66,33 @@ ExternalProject_Add(paho-mqtt-cpp
         ${CMAKE_COMMAND} --build <BINARY_DIR>
     INSTALL_COMMAND
         ${CMAKE_COMMAND} --build <BINARY_DIR> --target install
+)
+
+# Porcupine
+ExternalProject_Add(porcupine
+    GIT_REPOSITORY https://github.com/Picovoice/porcupine.git
+    GIT_TAG v3.0
+    GIT_SHALLOW ON
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND
+        # Copy Headers
+        ${CMAKE_COMMAND} -E make_directory ${EXTERNAL_INSTALL_LOCATION}/include
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            <SOURCE_DIR>/include/
+            ${EXTERNAL_INSTALL_LOCATION}/include/porcupine
+        # Copy Library
+        COMMAND ${CMAKE_COMMAND} -E copy
+            <SOURCE_DIR>/lib/raspberry-pi/cortex-a53-aarch64/libpv_porcupine.so
+            ${EXTERNAL_INSTALL_LOCATION}/lib/
+        # Copy Base Model
+        COMMAND ${CMAKE_COMMAND} -E copy
+            <SOURCE_DIR>/lib/common/porcupine_params.pv
+            ${EXTERNAL_INSTALL_LOCATION}/lib/
+        # Copy Keyword file
+        COMMAND ${CMAKE_COMMAND} -E copy
+            <SOURCE_DIR>/resources/keyword_files/raspberry-pi/jarvis_raspberry-pi.ppn
+            ${EXTERNAL_INSTALL_LOCATION}/lib/
 )
 
 # Add the external install location to the CMAKE_PREFIX_PATH
@@ -71,6 +113,7 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 add_dependencies(${PROJECT_NAME}
     pocketsphinx_external
     paho-mqtt-cpp
+    porcupine
 )
 
 # Add include directories
@@ -84,6 +127,7 @@ target_include_directories(${PROJECT_NAME}
         ${EXTERNAL_INSTALL_LOCATION}/include
         ${EXTERNAL_INSTALL_LOCATION}/include/pocketsphinx
         ${ALSA_INCLUDE_DIRS}
+        ${EXTERNAL_INSTALL_LOCATION}/include/porcupine
 )
 
 # Link libraries
@@ -102,15 +146,10 @@ target_link_libraries(${PROJECT_NAME}
         OpenSSL::Crypto
         nlohmann_json::nlohmann_json
         pthread
+        ${EXTERNAL_INSTALL_LOCATION}/lib/libpv_porcupine.so
 )
 
 # Installation rules
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
-
-# Optional: Enable ccache if available
-find_program(CCACHE_PROGRAM ccache)
-if(CCACHE_PROGRAM)
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-endif()
