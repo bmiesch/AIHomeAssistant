@@ -13,10 +13,9 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     nlohmann-json3-dev \
     && rm -rf /var/lib/apt/lists/*
-# Build the service
 WORKDIR /build
-COPY services .
-RUN set -e \
-    && cd core \
-    && cmake -B build -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build build
+COPY services/core/CMakeLists.txt services/core/
+COPY services services
+RUN cd services/core && \
+    cmake -B build -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build build

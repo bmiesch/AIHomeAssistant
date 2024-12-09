@@ -1,3 +1,10 @@
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "${CCACHE_PROGRAM}")
+    message(STATUS "Using ccache: ${CCACHE_PROGRAM}")
+endif()
+
 cmake_minimum_required(VERSION 3.10)
 project(led_manager_service)
 
@@ -12,8 +19,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Enable debug symbols and disable optimization (matching your Makefile)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic -g -O0")
+# Add build type configuration
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build" FORCE)
+endif()
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+
+# Modify compiler flags to be configuration-specific
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic")
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
@@ -109,9 +122,3 @@ target_link_libraries(${PROJECT_NAME}
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
-
-# Optional: Enable ccache if available
-find_program(CCACHE_PROGRAM ccache)
-if(CCACHE_PROGRAM)
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-endif()
