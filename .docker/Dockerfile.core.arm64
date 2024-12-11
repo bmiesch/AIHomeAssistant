@@ -14,8 +14,3 @@ RUN apt-get update && apt-get install -y \
     nlohmann-json3-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
-COPY services/core/CMakeLists.txt services/core/
-COPY services services
-RUN cd services/core && \
-    cmake -B build -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build build

@@ -74,6 +74,7 @@ void AudioCapture::ResetCaptureDevice() {
     snd_pcm_reset(audio_capture_device_);
 }
 
+// TODO: Can this be removed?
 std::vector<int16_t> AudioCapture::CaptureAudio(unsigned int duration_ms) {
     ResetCaptureDevice();
 
@@ -96,5 +97,26 @@ std::vector<int16_t> AudioCapture::CaptureAudio(unsigned int duration_ms) {
             frames_read += rc;
         }
     }
+    return buffer;
+}
+
+std::vector<int16_t> AudioCapture::CapturePorcupineFrame() {
+    static constexpr int32_t PORCUPINE_FRAME_LENGTH = 512;
+    std::vector<int16_t> buffer(PORCUPINE_FRAME_LENGTH);
+
+    int rc = snd_pcm_readi(audio_capture_device_, buffer.data(), PORCUPINE_FRAME_LENGTH);
+
+    if (rc == -EPIPE) {
+        WARN_LOG("Overrun occurred");
+        ResetCaptureDevice();
+        return CapturePorcupineFrame();
+    } else if (rc < 0) {
+        ERROR_LOG("Error from read: " + std::string(snd_strerror(rc)));
+        throw std::runtime_error("Failed to read audio");
+    } else if (rc != PORCUPINE_FRAME_LENGTH) {
+        ERROR_LOG("Short read, read " + std::to_string(rc) + " frames");
+        throw std::runtime_error("Short read");
+    }
+
     return buffer;
 }

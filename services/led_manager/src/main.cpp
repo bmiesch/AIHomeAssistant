@@ -58,8 +58,6 @@ int main() {
         }
 
         INFO_LOG("Initiating shutdown sequence...");
-        led_manager.Stop();
-        INFO_LOG("Shutdown complete.");
     } catch (const std::exception& e) {
         ERROR_LOG("Error: " + std::string(e.what()));
         return 1;

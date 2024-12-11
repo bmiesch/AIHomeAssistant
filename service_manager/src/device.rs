@@ -75,7 +75,22 @@ impl Device {
     }
 
     fn create_ssh_session(&mut self) -> Result<&Session, DeviceError> {
-        let tcp = TcpStream::connect(&format!("{}:22", self.config.ip_address))?;
+        // let tcp = TcpStream::connect(&format!("{}:22", self.config.ip_address))?;
+        let addr = format!("{}:22", self.config.ip_address)
+        .parse()
+        .map_err(|e| DeviceError::SshError(format!(
+            "Invalid IP address for device {} ({}): {}",
+            self.name, self.config.ip_address, e
+        )))?;
+
+        let tcp = TcpStream::connect_timeout(
+            &addr,
+            std::time::Duration::from_secs(3)
+        ).map_err(|e| DeviceError::SshError(format!(
+            "Failed to connect to device {} ({}): {}",
+            self.name, self.config.ip_address, e
+        )))?;
+
         let mut ssh = Session::new()?;
         ssh.set_tcp_stream(tcp);
         ssh.handshake()?;

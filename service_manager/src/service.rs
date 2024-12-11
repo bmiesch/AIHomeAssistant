@@ -57,12 +57,14 @@ impl ServiceManager {
         let mqtt_username = env::var("MQTT_USERNAME").expect("MQTT_USERNAME not set");
         let mqtt_password = env::var("MQTT_PASSWORD").expect("MQTT_PASSWORD not set");
         let mqtt_ca_dir = env::var("SERVICES_CA_DIR").expect("SERVICES_CA_DIR not set");
+        let picovoice_access_key = env::var("PICOVOICE_ACCESS_KEY").expect("PICOVOICE_ACCESS_KEY not set");
 
         let template = Self::read_service_template(&service.name)?;
         Ok(template.replace("{mqtt_broker}", &mqtt_broker)
             .replace("{mqtt_username}", &mqtt_username)
             .replace("{mqtt_password}", &mqtt_password)
             .replace("{mqtt_ca_dir}", &mqtt_ca_dir)
+            .replace("{picovoice_access_key}", &picovoice_access_key)
             .replace("{username}", &service.device.config.username))
     }
 
