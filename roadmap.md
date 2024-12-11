@@ -8,6 +8,7 @@
 - [ ] Stream logs from remote devices to web interface
 - [X] Remove multiple SSH connections in service.rs
 - [X] Solve LED re-connection issues
+- [ ] Add ability to copy files to remote device (service generic)
 
 # Command Parser and Executor (PocketSphinx)
 * Simple ON/OFF and color change commands working via bluetooth

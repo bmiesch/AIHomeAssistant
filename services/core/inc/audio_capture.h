@@ -27,6 +27,7 @@ public:
     ~AudioCapture();
 
     std::vector<int16_t> CaptureAudio(unsigned int duration_ms);
+    std::vector<int16_t> CapturePorcupineFrame();
 
     AudioCapture(const AudioCapture&) = delete;
     AudioCapture& operator=(const AudioCapture&) = delete;

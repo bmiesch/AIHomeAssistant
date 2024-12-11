@@ -28,71 +28,92 @@ Core::~Core() {
 }
 
 void Core::AudioCaptureLoop() {
+    // auto last_capture_time = std::chrono::steady_clock::now();
+    // int frame_count = 0;
+    
     while(running_) {
         try {
-            auto buffer = audio_capture_->CaptureAudio(1000);
+            auto frame = audio_capture_->CapturePorcupineFrame();
             if (!running_) break;
             
-            if (buffer.empty()) {
-                WARN_LOG("Received empty buffer from audio capture");
-                continue;
-            }
+            // Log timing every 100 frames (roughly 3.2 seconds)
+            // frame_count++;
+            // if (frame_count % 100 == 0) {
+            //     auto now = std::chrono::steady_clock::now();
+            //     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            //         now - last_capture_time).count();
+            //     float fps = 100000.0f / duration;
+            //     DEBUG_LOG("Audio capture rate: " + std::to_string(fps) + " fps, Queue size: " 
+            //         + std::to_string(audio_queue_.size()));
+            //     last_capture_time = now;
+            // }
             
             {
                 std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-                if (audio_queue_.size() > 5) {
-                    WARN_LOG("Audio queue overflow: " + std::to_string(audio_queue_.size()) + " buffers");
-                    while (audio_queue_.size() > 3) {
-                        audio_queue_.pop();
-                    }
+                if (audio_queue_.size() > 125) {
+                    ERROR_LOG("Audio queue overflow! Queue size: " + std::to_string(audio_queue_.size()) 
+                        + " frames (" + std::to_string(audio_queue_.size() * 32) + "ms of audio)");
                 }
-                audio_queue_.push(std::move(buffer));
+                audio_queue_.push(std::move(frame));
             }
             audio_queue_cv_.notify_one();
         } catch (const std::exception& e) {
             ERROR_LOG("Exception in audio capture: " + std::string(e.what()));
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
 }
 
-
 void Core::AudioProcessingLoop() {
+    static constexpr size_t FRAMES_FOR_COMMAND = 125;
+    // auto last_process_time = std::chrono::steady_clock::now();
+    // int frame_count = 0;
+
     while(running_) {
-        std::vector<int16_t> buffer;
+        std::vector<int16_t> frame;
         {
             std::unique_lock<std::mutex> lock(audio_queue_mutex_);
             audio_queue_cv_.wait(lock, [this] { return !audio_queue_.empty() || !running_; });
             if (!running_) break;
-            buffer = std::move(audio_queue_.front());
+            frame = std::move(audio_queue_.front());
             audio_queue_.pop();
         }
 
-        if (running_ && keyword_detector_->DetectKeyword(buffer, true)) {
-            if (!running_) break;
+        // frame_count++;
+        // if (frame_count % 100 == 0) {
+        //     auto now = std::chrono::steady_clock::now();
+        //     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        //         now - last_process_time).count();
+        //     float fps = 100000.0f / duration;
+        //     DEBUG_LOG("Audio processing rate: " + std::to_string(fps) + " fps");
+        //     last_process_time = now;
+        // }
+
+        if (running_ && keyword_detector_->DetectKeyword(frame, true)) {
+            INFO_LOG("Keyword detected! Listening for command...");
             
-            // Clear any backlogged audio before starting command collection
+            // Clear any backlogged audio
             {
                 std::lock_guard<std::mutex> lock(audio_queue_mutex_);
                 std::queue<std::vector<int16_t>> empty;
                 std::swap(audio_queue_, empty);
             }
-            INFO_LOG("Keyword detected! Listening for command...");
             
-            // Collect audio for 5 seconds (5 buffers of 1000ms each)
+            // Collect 4 seconds of audio for command detection
             std::vector<int16_t> command_buffer;
-            for (int i = 0; i < 5; ++i) {
+            command_buffer.reserve(FRAMES_FOR_COMMAND * 512);
+            
+            for (size_t i = 0; i < FRAMES_FOR_COMMAND; ++i) {
                 std::unique_lock<std::mutex> lock(audio_queue_mutex_);
-                // Wait for audio data to be available in the queue or for the running flag to be false
-                audio_queue_cv_.wait(lock, [this] {return !audio_queue_.empty() || !running_; });
-                if (!running_) break;
-                if (audio_queue_.empty()) {
-                    WARN_LOG("Missed audio buffer during command collection");
+                if (!audio_queue_cv_.wait_for(lock, std::chrono::milliseconds(100),
+                    [this] { return !audio_queue_.empty() || !running_; })) {
                     continue;
                 }
-                auto next_buffer = std::move(audio_queue_.front());
+                if (!running_) break;
+                
+                auto next_frame = std::move(audio_queue_.front());
                 audio_queue_.pop();
-                command_buffer.insert(command_buffer.end(), next_buffer.begin(), next_buffer.end());
+                command_buffer.insert(command_buffer.end(), next_frame.begin(), next_frame.end());
             }
 
             if (!running_) break;

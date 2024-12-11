@@ -93,29 +93,34 @@ echo "    && rm -rf /var/lib/apt/lists/*" >> "$DOCKER_FILE"
 # Setup build environment
 echo "WORKDIR /build" >> "$DOCKER_FILE"
 
-# Copy CMakeLists.txt first to leverage layer caching
-echo "COPY services/${SERVICE_NAME}/CMakeLists.txt services/${SERVICE_NAME}/" >> "$DOCKER_FILE"
-
-# Copy all source and build
-echo "COPY services services" >> "$DOCKER_FILE"
-echo "RUN cd services/${SERVICE_NAME} && \\" >> "$DOCKER_FILE"
-echo "    cmake -B build -DCMAKE_BUILD_TYPE=$BUILD_TYPE && \\" >> "$DOCKER_FILE"
-echo "    cmake --build build" >> "$DOCKER_FILE"
-
-# Build the image and run the container
-if ! docker build \
-    --build-arg BUILDKIT_INLINE_CACHE=1 \
-    --cache-from="${SERVICE_NAME}-${ARCH}" \
-    -t "${SERVICE_NAME}-${ARCH}" \
-    -f "$DOCKER_FILE" .; then
-    echo "Docker build failed!"
-    exit 1
-fi
-
 CONTAINER_NAME="${SERVICE_NAME}-${ARCH}-container"
+
 if ! docker ps -a | grep -q ${CONTAINER_NAME}; then
-    docker create --name "${CONTAINER_NAME}" "${SERVICE_NAME}-${ARCH}"
+    if ! docker build \
+        -t "${SERVICE_NAME}-${ARCH}" \
+        -f "$DOCKER_FILE" .; then
+        echo "Docker build failed!"
+        exit 1
+    fi
+    
+    docker create --name "${CONTAINER_NAME}" -t "${SERVICE_NAME}-${ARCH}" tail -f /dev/null
+    docker start ${CONTAINER_NAME}
+    
+    docker cp services "${CONTAINER_NAME}:/build/"
+    docker exec ${CONTAINER_NAME} /bin/bash -c "cd /build/services/${SERVICE_NAME} && cmake -B build -DCMAKE_BUILD_TYPE=$BUILD_TYPE && cmake --build build"
+else
+    if ! docker ps | grep -q ${CONTAINER_NAME}; then
+        docker start ${CONTAINER_NAME}
+    fi
+    
+    docker cp services/${SERVICE_NAME}/src "${CONTAINER_NAME}:/build/services/${SERVICE_NAME}/"
+    docker cp services/${SERVICE_NAME}/inc "${CONTAINER_NAME}:/build/services/${SERVICE_NAME}/"
+    docker cp services/common "${CONTAINER_NAME}:/build/services/"
+    docker cp services/interfaces "${CONTAINER_NAME}:/build/services/"
+    
+    docker exec ${CONTAINER_NAME} /bin/bash -c "cd /build/services/${SERVICE_NAME} && cmake --build build"
 fi
 
 docker cp "${CONTAINER_NAME}:/build/services/${SERVICE_NAME}/build/${SERVICE_NAME}_service" "${TARGETS_DIR}/"
+docker stop ${CONTAINER_NAME}
 echo "Build complete! Binary is in target/${ARCH}/${SERVICE_NAME}"

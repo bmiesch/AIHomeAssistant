@@ -1,21 +1,48 @@
-#include "keyword_detector.h"
-#include "log.h"
 #include <stdexcept>
 #include <algorithm>
 #include <fstream>
-#include <filesystem> 
+#include <filesystem>
+#include <cmath>
+#include <algorithm>
+#include <limits>
+#include "keyword_detector.h"
+#include "log.h"
 
-KeywordDetector::KeywordDetector(const std::string& hmm_path)
+KeywordDetector::KeywordDetector(const std::string& hmm_path, const std::string& porcupine_model_path, const std::string& porcupine_keyword_path)
     : config_(ps_config_init(nullptr), ps_config_free),
-      kws_config_(nullptr, ps_config_free),
       jsgf_config_(nullptr, ps_config_free),
-      ps_(nullptr, ps_free) {
-    
+      ps_(nullptr, ps_free),
+      porcupine_(nullptr, pv_porcupine_delete) {
+
+    // Porcupine
+    const char* access_key = std::getenv("PICOVOICE_ACCESS_KEY");
+    if (access_key == nullptr) {
+        throw std::runtime_error("PICOVOICE_ACCESS_KEY is not set");
+    }
+
+    const char* model_path = porcupine_model_path.c_str();
+    const char* keyword_path = porcupine_keyword_path.c_str();
+    const float sensitivity = 0.7f;
+    pv_porcupine_t* porcupine_raw = nullptr;
+    pv_status_t status = pv_porcupine_init(
+        access_key,
+        model_path,
+        1, // Number of keywords
+        &keyword_path,
+        &sensitivity, 
+        &porcupine_raw
+    );
+
+    if (status != PV_STATUS_SUCCESS) {
+        throw std::runtime_error("Failed to initialize Porcupine");
+    }
+    porcupine_.reset(porcupine_raw);
+
+    // PocketSphinx
     CreateConfigWithFiles();
     InitConfig(hmm_path);
     ps_.reset(ps_init(config_.get()));
     if (!ps_) {
-        ERROR_LOG("Failed to initialize PocketSphinx");
         throw std::runtime_error("Failed to initialize PocketSphinx");
     }
     INFO_LOG("KeywordDetector initialized successfully");
@@ -30,21 +57,7 @@ void KeywordDetector::InitConfig(const std::string& hmm_path) {
     }
 
     std::string dict_path = GetTempPath("keyword.dict");
-    std::string kws_path = GetTempPath("keyword.list");
     std::string gram_path = GetTempPath("commands.gram");
-
-    // Keyword Configuration
-    kws_config_.reset(ps_config_init(nullptr));
-    std::string kws_json = R"({
-        "hmm": ")" + hmm_path + R"(",
-        "dict": ")" + dict_path + R"(",
-        "kws": ")" + kws_path + R"(",
-        "kws_threshold": 1e-20
-    })";
-    if (ps_config_parse_json(kws_config_.get(), kws_json.c_str()) == nullptr) {
-        ERROR_LOG("Failed to parse KWS configuration");
-        throw std::runtime_error("Failed to parse KWS configuration");
-    }
 
     // JSGF Grammar Configuration
     jsgf_config_.reset(ps_config_init(nullptr));
@@ -58,47 +71,33 @@ void KeywordDetector::InitConfig(const std::string& hmm_path) {
         throw std::runtime_error("Failed to parse JSGF configuration");
     }
 
-    if (!kws_config_ || !jsgf_config_) {
-        ERROR_LOG("Failed to create mode-specific configurations");
-        throw std::runtime_error("Failed to create configurations");
-    }
-
     INFO_LOG("PocketSphinx configuration initialized successfully");
 }
 
 bool KeywordDetector::DetectKeyword(const std::vector<int16_t>& buffer, bool verbose) const {
-    if (ps_reinit(ps_.get(), kws_config_.get()) < 0) {
-        ERROR_LOG("Failed to switch to keyword spotting mode");
-        throw std::runtime_error("Failed to switch configuration");
-    }
-
-    if (ps_start_utt(ps_.get()) < 0) {
-        ERROR_LOG("Failed to start utterance in DetectKeyword");
-        throw std::runtime_error("Failed to start utterance");
-    }
+    std::vector<int16_t> processed = buffer;
+    (void)verbose;
     
-    if (ps_process_raw(ps_.get(), buffer.data(), buffer.size(), false, false) < 0) {
-        ERROR_LOG("Failed to process audio in DetectKeyword");
-        throw std::runtime_error("Failed to process audio");
+    // Remove DC offset
+    int32_t sum = 0;
+    for (const auto& sample : buffer) {
+        sum += sample;
     }
+    int16_t offset = sum / buffer.size();
     
-    if (ps_end_utt(ps_.get()) < 0) {
-        ERROR_LOG("Failed to end utterance in DetectKeyword");
-        throw std::runtime_error("Failed to end utterance");
+    // Apply DC offset removal and small gain
+    const float gain = 1.5f;
+    for (auto& sample : processed) {
+        int32_t adjusted = (sample - offset) * gain;
+        sample = std::max(std::min(adjusted, 32767), -32768);
     }
 
-    const char* hyp = ps_get_hyp(ps_.get(), nullptr);
-    if (hyp != nullptr) {
-        std::string hypothesis(hyp);
-        std::transform(hypothesis.begin(), hypothesis.end(), hypothesis.begin(), ::tolower);
-        DEBUG_LOG("Detected hypothesis: " + hypothesis);
-
-        if (hypothesis.find("hello") != std::string::npos) {
-            if (verbose) INFO_LOG("Activation word 'hello' detected");
-            return true;
-        }
-    } else {
-        DEBUG_LOG("No hypothesis detected");
+    int32_t keyword_index = -1;
+    pv_porcupine_process(porcupine_.get(), processed.data(), &keyword_index);
+    
+    if (keyword_index >= 0) {
+        INFO_LOG("Keyword detected!");
+        return true;
     }
     return false;
 }
@@ -144,7 +143,6 @@ Command KeywordDetector::DetectCommand(const std::vector<int16_t>& buffer, bool 
 
 void KeywordDetector::CreateConfigWithFiles() {
     WriteStringToFile(GetTempPath("keyword.dict"), KEYWORD_DICT);
-    WriteStringToFile(GetTempPath("keyword.list"), KEYWORD_LIST);
     WriteStringToFile(GetTempPath("commands.gram"), COMMANDS_GRAM);
 }
 
