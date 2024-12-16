@@ -37,19 +37,6 @@ find_package(nlohmann_json REQUIRED)
 # Set up external dependencies installation prefix
 set(EXTERNAL_INSTALL_LOCATION ${CMAKE_BINARY_DIR}/external)
 
-# PocketSphinx
-ExternalProject_Add(pocketsphinx_external
-    GIT_REPOSITORY https://github.com/cmusphinx/pocketsphinx.git
-    GIT_TAG master
-    GIT_SHALLOW ON
-    CMAKE_ARGS
-        -DCMAKE_INSTALL_PREFIX=${EXTERNAL_INSTALL_LOCATION}
-    BUILD_COMMAND
-        ${CMAKE_COMMAND} --build <BINARY_DIR>
-    INSTALL_COMMAND
-        ${CMAKE_COMMAND} --build <BINARY_DIR> --target install
-)
-
 # Paho MQTT C++
 ExternalProject_Add(paho-mqtt-cpp
     GIT_REPOSITORY https://github.com/eclipse/paho.mqtt.cpp.git
@@ -138,7 +125,6 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 
 # Add dependencies on external projects
 add_dependencies(${PROJECT_NAME}
-    pocketsphinx_external
     paho-mqtt-cpp
     porcupine
     rhino
@@ -153,7 +139,6 @@ target_include_directories(${PROJECT_NAME}
         ${INTERFACES_DIR}/mqtt_interface
         ${INTERFACES_DIR}/service_interface
         ${EXTERNAL_INSTALL_LOCATION}/include
-        ${EXTERNAL_INSTALL_LOCATION}/include/pocketsphinx
         ${ALSA_INCLUDE_DIRS}
         ${EXTERNAL_INSTALL_LOCATION}/include/porcupine
         ${EXTERNAL_INSTALL_LOCATION}/include/rhino
@@ -167,7 +152,6 @@ target_link_directories(${PROJECT_NAME}
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
-        pocketsphinx
         paho-mqttpp3
         paho-mqtt3as
         ${ALSA_LIBRARIES}

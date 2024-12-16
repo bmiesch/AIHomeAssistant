@@ -65,7 +65,6 @@ void Core::AudioCaptureLoop() {
 }
 
 void Core::AudioProcessingLoop() {
-    static constexpr size_t FRAMES_FOR_COMMAND = 125;
     // auto last_process_time = std::chrono::steady_clock::now();
     // int frame_count = 0;
 

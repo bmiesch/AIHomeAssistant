@@ -207,6 +207,32 @@ impl ServiceManager {
         service.device.execute_command(&format!("sudo chown {} {}", service.device.config.username, remote_ca_path))?;
         service.device.execute_command(&format!("sudo chmod 644 {}", remote_ca_path))?;
 
+        // Copy over the lib files
+        let local_lib_dir = ROOT_DIR.join("services").join(&service.name).join("lib");
+        let remote_lib_dir = format!("/usr/local/lib/{}", service.name);
+        service.device.execute_command(&format!("sudo rm -rf {}", remote_lib_dir))?;
+        service.device.execute_command(&format!("sudo mkdir -p {}", remote_lib_dir))?;
+        service.device.execute_command(&format!("sudo chown {} {}", service.device.config.username, remote_lib_dir))?;
+
+        let status = Command::new("sshpass")
+            .args([
+                "-p", &service.device.config.password,
+                "scp",
+                "-r",
+                &format!("{}/.", local_lib_dir.to_str().unwrap()),
+                &format!("{}@{}:{}",
+                    service.device.config.username,
+                    service.device.config.ip_address,
+                    remote_lib_dir
+                )   
+            ])
+            .status()?;
+
+        if !status.success() {
+            return Err(ServiceManagerError::DeploymentError(
+                "Failed to copy library files".to_string()
+            ));
+        }
         // First disable and unmask the service if it exists
         info!("Cleaning up existing service state");
         service.device.execute_command(&format!(
