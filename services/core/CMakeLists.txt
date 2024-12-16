@@ -95,6 +95,33 @@ ExternalProject_Add(porcupine
             ${EXTERNAL_INSTALL_LOCATION}/lib/
 )
 
+# Rhino
+ExternalProject_Add(rhino
+    GIT_REPOSITORY https://github.com/Picovoice/rhino.git
+    GIT_TAG v3.0
+    GIT_SHALLOW ON
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND
+        # Copy Headers
+        ${CMAKE_COMMAND} -E make_directory ${EXTERNAL_INSTALL_LOCATION}/include
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            <SOURCE_DIR>/include/
+            ${EXTERNAL_INSTALL_LOCATION}/include/rhino
+        # Copy Library
+        COMMAND ${CMAKE_COMMAND} -E copy
+            <SOURCE_DIR>/lib/raspberry-pi/cortex-a53-aarch64/libpv_rhino.so
+            ${EXTERNAL_INSTALL_LOCATION}/lib/
+        # Copy Base Model
+        COMMAND ${CMAKE_COMMAND} -E copy
+            <SOURCE_DIR>/lib/common/rhino_params.pv
+            ${EXTERNAL_INSTALL_LOCATION}/lib/
+        # Copy Context file from local repo
+        COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_CURRENT_SOURCE_DIR}/lib/Smart-Home_en_raspberry-pi_v3_0_0.rhn
+            ${EXTERNAL_INSTALL_LOCATION}/lib/
+)
+
 # Add the external install location to the CMAKE_PREFIX_PATH
 list(APPEND CMAKE_PREFIX_PATH ${EXTERNAL_INSTALL_LOCATION})
 
@@ -114,6 +141,7 @@ add_dependencies(${PROJECT_NAME}
     pocketsphinx_external
     paho-mqtt-cpp
     porcupine
+    rhino
 )
 
 # Add include directories
@@ -128,6 +156,7 @@ target_include_directories(${PROJECT_NAME}
         ${EXTERNAL_INSTALL_LOCATION}/include/pocketsphinx
         ${ALSA_INCLUDE_DIRS}
         ${EXTERNAL_INSTALL_LOCATION}/include/porcupine
+        ${EXTERNAL_INSTALL_LOCATION}/include/rhino
 )
 
 # Link libraries
@@ -147,6 +176,7 @@ target_link_libraries(${PROJECT_NAME}
         nlohmann_json::nlohmann_json
         pthread
         ${EXTERNAL_INSTALL_LOCATION}/lib/libpv_porcupine.so
+        ${EXTERNAL_INSTALL_LOCATION}/lib/libpv_rhino.so
 )
 
 # Installation rules
