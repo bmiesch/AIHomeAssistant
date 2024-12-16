@@ -13,10 +13,4 @@ RUN apt-get update && apt-get install -y \
     nlohmann-json3-dev \
     libdbus-1-dev \
     && rm -rf /var/lib/apt/lists/*
-# Build the service
 WORKDIR /build
-COPY services .
-RUN set -e \
-    && cd led_manager \
-    && cmake -B build -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build build

@@ -8,11 +8,12 @@
 #include "keyword_detector.h"
 #include "log.h"
 
-KeywordDetector::KeywordDetector(const std::string& hmm_path, const std::string& porcupine_model_path, const std::string& porcupine_keyword_path)
-    : config_(ps_config_init(nullptr), ps_config_free),
-      jsgf_config_(nullptr, ps_config_free),
-      ps_(nullptr, ps_free),
-      porcupine_(nullptr, pv_porcupine_delete) {
+KeywordDetector::KeywordDetector(const std::string& porcupine_model_path,
+                                 const std::string& porcupine_keyword_path,
+                                 const std::string& rhino_model_path,
+                                 const std::string& rhino_context_path)
+    : porcupine_(nullptr, pv_porcupine_delete),
+      rhino_(nullptr, pv_rhino_delete) {
 
     // Porcupine
     const char* access_key = std::getenv("PICOVOICE_ACCESS_KEY");
@@ -20,16 +21,16 @@ KeywordDetector::KeywordDetector(const std::string& hmm_path, const std::string&
         throw std::runtime_error("PICOVOICE_ACCESS_KEY is not set");
     }
 
-    const char* model_path = porcupine_model_path.c_str();
-    const char* keyword_path = porcupine_keyword_path.c_str();
-    const float sensitivity = 0.7f;
+    const char* p_model_path = porcupine_model_path.c_str();
+    const char* p_keyword_path = porcupine_keyword_path.c_str();
+    const float p_sensitivity = 0.7f;
     pv_porcupine_t* porcupine_raw = nullptr;
     pv_status_t status = pv_porcupine_init(
         access_key,
-        model_path,
+        p_model_path,
         1, // Number of keywords
-        &keyword_path,
-        &sensitivity, 
+        &p_keyword_path,
+        &p_sensitivity, 
         &porcupine_raw
     );
 
@@ -38,40 +39,27 @@ KeywordDetector::KeywordDetector(const std::string& hmm_path, const std::string&
     }
     porcupine_.reset(porcupine_raw);
 
-    // PocketSphinx
-    CreateConfigWithFiles();
-    InitConfig(hmm_path);
-    ps_.reset(ps_init(config_.get()));
-    if (!ps_) {
-        throw std::runtime_error("Failed to initialize PocketSphinx");
+    // Rhino
+    const char* r_model_path = rhino_model_path.c_str();
+    const char* r_context_path = rhino_context_path.c_str();
+    const float r_sensitivity = 0.7f;
+    const float r_endpoint_duration_sec = 0.5f;
+    const bool r_require_endpoint = true;
+    pv_rhino_t* rhino_raw = nullptr;
+    pv_status_t rhino_status = pv_rhino_init(
+        access_key,
+        r_model_path,
+        r_context_path,
+        r_sensitivity,
+        r_endpoint_duration_sec,
+        r_require_endpoint,
+        &rhino_raw
+    );
+
+    if (rhino_status != PV_STATUS_SUCCESS) {
+        throw std::runtime_error("Failed to initialize Rhino");
     }
-    INFO_LOG("KeywordDetector initialized successfully");
-}
-
-void KeywordDetector::InitConfig(const std::string& hmm_path) {
-    DEBUG_LOG("Initializing PocketSphinx configuration");
-    if (ps_config_set_str(config_.get(), "hmm", hmm_path.c_str()) == nullptr ||
-        ps_config_set_bool(config_.get(), "verbose", true) == nullptr) {
-        ERROR_LOG("Failed to set PocketSphinx configuration");
-        throw std::runtime_error("Failed to set configuration");
-    }
-
-    std::string dict_path = GetTempPath("keyword.dict");
-    std::string gram_path = GetTempPath("commands.gram");
-
-    // JSGF Grammar Configuration
-    jsgf_config_.reset(ps_config_init(nullptr));
-    std::string jsgf_json = R"({
-        "hmm": ")" + hmm_path + R"(",
-        "dict": ")" + dict_path + R"(",
-        "jsgf": ")" + gram_path + R"("
-    })";
-    if (ps_config_parse_json(jsgf_config_.get(), jsgf_json.c_str()) == nullptr) {
-        ERROR_LOG("Failed to parse JSGF configuration");
-        throw std::runtime_error("Failed to parse JSGF configuration");
-    }
-
-    INFO_LOG("PocketSphinx configuration initialized successfully");
+    rhino_.reset(rhino_raw);
 }
 
 bool KeywordDetector::DetectKeyword(const std::vector<int16_t>& buffer, bool verbose) const {
@@ -103,51 +91,63 @@ bool KeywordDetector::DetectKeyword(const std::vector<int16_t>& buffer, bool ver
 }
 
 Command KeywordDetector::DetectCommand(const std::vector<int16_t>& buffer, bool verbose) {
-    if (ps_reinit(ps_.get(), jsgf_config_.get()) < 0) {
-        ERROR_LOG("Failed to switch to JSGF grammar mode");
-        throw std::runtime_error("Failed to switch configuration");
-    }
-
-    if (ps_start_utt(ps_.get()) < 0) {
-        ERROR_LOG("Failed to start utterance in DetectCommand");
-        throw std::runtime_error("Failed to start utterance");
-    }
+    bool is_finalized = false;
+    pv_status_t status = pv_rhino_process(rhino_.get(), buffer.data(), &is_finalized);
     
-    if (ps_process_raw(ps_.get(), buffer.data(), buffer.size(), false, false) < 0) {
+    if (status != PV_STATUS_SUCCESS) {
         ERROR_LOG("Failed to process audio in DetectCommand");
         throw std::runtime_error("Failed to process audio");
     }
-    
-    if (ps_end_utt(ps_.get()) < 0) {
-        ERROR_LOG("Failed to end utterance in DetectCommand");
-        throw std::runtime_error("Failed to end utterance");
-    }
 
-    const char* hyp = ps_get_hyp(ps_.get(), nullptr);
-    if (hyp != nullptr) {
-        std::string hypothesis(hyp);
-        DEBUG_LOG("Detected command hypothesis: " + hypothesis);
-
-        if (hypothesis == "turn light on") {
-            if (verbose) INFO_LOG("Command detected: TURN_ON");
-            return Command::TURN_ON;
-        } else if (hypothesis == "turn light off") {
-            if (verbose) INFO_LOG("Command detected: TURN_OFF");
-            return Command::TURN_OFF;
+    if (is_finalized) {
+        bool is_understood = false;
+        status = pv_rhino_is_understood(rhino_.get(), &is_understood);
+        
+        if (status != PV_STATUS_SUCCESS) {
+            ERROR_LOG("Failed to check if command was understood");
+            throw std::runtime_error("Failed to check command understanding");
         }
-    } else {
-        DEBUG_LOG("No command hypothesis detected");
+
+        if (is_understood) {
+            const char* intent = nullptr;
+            const char** slots = nullptr;
+            const char** values = nullptr;
+            int32_t num_slots = 0;
+            
+            status = pv_rhino_get_intent(rhino_.get(), &intent, &num_slots, 
+                                       (const char***)&slots, 
+                                       (const char***)&values);
+            
+            if (status != PV_STATUS_SUCCESS) {
+                ERROR_LOG("Failed to get intent from Rhino");
+                throw std::runtime_error("Failed to get intent");
+            }
+
+            std::string intent_str(intent);
+            DEBUG_LOG("Detected intent: " + intent_str);
+
+            Command result = Command::NO_COMMAND;
+            if (intent_str == "changeState" && num_slots > 0 && std::string(values[0]) == "on") {
+                if (verbose) INFO_LOG("Command detected: TURN_ON");
+                result = Command::TURN_ON;
+            } else if (intent_str == "changeState" && num_slots > 0 && std::string(values[0]) == "off") {
+                if (verbose) INFO_LOG("Command detected: TURN_OFF");
+                result = Command::TURN_OFF;
+            }
+
+            // Free the intent, slots, and values
+            pv_rhino_free_slots_and_values(rhino_.get(), 
+                                         const_cast<const char**>(slots), 
+                                         const_cast<const char**>(values));
+
+            pv_rhino_reset(rhino_.get());
+            return result;
+        } else {
+            DEBUG_LOG("Command not understood");
+            pv_rhino_reset(rhino_.get());
+            return Command::NO_COMMAND;
+        }
     }
-    return Command::NO_COMMAND;
-}
-
-void KeywordDetector::CreateConfigWithFiles() {
-    WriteStringToFile(GetTempPath("keyword.dict"), KEYWORD_DICT);
-    WriteStringToFile(GetTempPath("commands.gram"), COMMANDS_GRAM);
-}
-
-void KeywordDetector::WriteStringToFile(const std::string& path, const char* content) {
-    std::ofstream file(path);
-    file << content;
-    file.close();
+    
+    return Command::PROCESSING;
 }

@@ -91,35 +91,30 @@ void Core::AudioProcessingLoop() {
 
         if (running_ && keyword_detector_->DetectKeyword(frame, true)) {
             INFO_LOG("Keyword detected! Listening for command...");
-            
-            // Clear any backlogged audio
+
+            std::vector<int16_t> next_frame;
             {
-                std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-                std::queue<std::vector<int16_t>> empty;
-                std::swap(audio_queue_, empty);
-            }
-            
-            // Collect 4 seconds of audio for command detection
-            std::vector<int16_t> command_buffer;
-            command_buffer.reserve(FRAMES_FOR_COMMAND * 512);
-            
-            for (size_t i = 0; i < FRAMES_FOR_COMMAND; ++i) {
                 std::unique_lock<std::mutex> lock(audio_queue_mutex_);
-                if (!audio_queue_cv_.wait_for(lock, std::chrono::milliseconds(100),
-                    [this] { return !audio_queue_.empty() || !running_; })) {
-                    continue;
-                }
+                audio_queue_cv_.wait(lock, [this] { return !audio_queue_.empty() || !running_; });
                 if (!running_) break;
-                
-                auto next_frame = std::move(audio_queue_.front());
+                next_frame = std::move(audio_queue_.front());
                 audio_queue_.pop();
-                command_buffer.insert(command_buffer.end(), next_frame.begin(), next_frame.end());
+            }
+            
+            Command cmd = keyword_detector_->DetectCommand(next_frame, true);
+            while (cmd == Command::PROCESSING) {
+                {
+                    std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+                    audio_queue_cv_.wait(lock, [this] { return !audio_queue_.empty() || !running_; });
+                    if (!running_) break;
+                    next_frame = std::move(audio_queue_.front());
+                    audio_queue_.pop();
+                }
+                cmd = keyword_detector_->DetectCommand(next_frame, true);
             }
 
             if (!running_) break;
-            Command cmd = keyword_detector_->DetectCommand(command_buffer, true);
-            if (!running_) break;
-
+            
             switch(cmd) {
                 case Command::TURN_ON:
                     INFO_LOG("Command detected: TURN_ON");
@@ -210,10 +205,9 @@ void Core::IncomingMessage(const std::string& topic, const std::string& payload)
 void Core::PublishLEDManagerCommand(const std::string& command, const json& params) {
     json message{{"command", command}, {"params", params}};
     std::string topic = LED_MANAGER_COMMAND_TOPIC;
-    std::string payload = message.dump();
 
     DEBUG_LOG("Publishing command: " + command + " to topic: " + topic);
-    Publish(topic, payload);
+    Publish(topic, message);
 }
 
 void Core::HandleServiceStatus(const std::string& topic, const std::string& payload) {
