@@ -8,6 +8,7 @@ start*
 targets/arm64
 dump/
 **.env
+**/lib/
 
 # Build artifacts
 **/target/
