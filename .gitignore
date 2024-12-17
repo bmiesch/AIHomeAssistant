@@ -1,5 +1,4 @@
 .vscode
-bm
 *.cross.o
 start*
 **/config/devices.yaml
@@ -8,7 +7,11 @@ start*
 targets/arm64
 dump/
 **.env
-**/lib/
+!example.env
+**/lib/*
+!**/lib/.gitkeep
+notes.md
+roadmap.md
 
 # Build artifacts
 **/target/
