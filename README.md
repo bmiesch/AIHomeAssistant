@@ -14,7 +14,7 @@ This project demonstrates a microservices architecture for home automation, feat
 
 ### Service Manager
 Distributed service orchestrator implementing:
-- Service lifecycle management and deployment
+- Service lifecycle management and deployment via systemd
 - Health monitoring and status reporting
 - Configuration management and distribution
 - Remote management interface via MQTT
