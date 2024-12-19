@@ -1,23 +1,20 @@
 # AI Home Assistant
 
-A distributed IoT system implementing a locally-processed voice assistant using MQTT for service communication and Picovoice models for voice processing.
-
-## Overview
-This project demonstrates a microservices architecture for home automation, featuring local voice processing and distributed service management.
+A distributed MQTT-based IoT system controlled via a locally-processed voice assistant that uses wake words and intent classification. A Service Manager is used to cross-compile, deploy, and manage services on remote devices.
 
 ## Architecture Components
 
 ### Voice Processing Pipeline
-- Wake word detection using Picovoice
-- Audio processing and intent classification
-- Service routing based on intent classification
+- ALSA audio capture
+- Wake word detection with Picovoice Porcupine ("Jarvis") to trigger intent classification
+- Intent classification with Picovoice Rhino -> Command
+- Commands routed to appropriate services
 
 ### Service Manager
-Distributed service orchestrator implementing:
-- Service lifecycle management and deployment via systemd
+- Cross-compile services for different architectures with Docker
+- Deploy services to remote devices and manage them with systemd
 - Health monitoring and status reporting
-- Configuration management and distribution
-- Remote management interface via MQTT
+- MQTT client for direct service control
 
 ### Core Services
 - **Core Service**: Handles audio pipeline, wake word detection, and intent classification
