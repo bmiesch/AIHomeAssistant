@@ -18,7 +18,6 @@ using json = nlohmann::json;
 
 class Core : public IService, public PahoMqttClient {
 public:
-    // Constructor & Destructor
     Core(const std::string& broker_address, 
          const std::string& client_id, 
          const std::string& ca_path, 
@@ -26,7 +25,6 @@ public:
          const std::string& password);
     ~Core() override;
 
-    // Delete copy constructor and assignment operator
     Core(const Core&) = delete;
     Core& operator=(const Core&) = delete;
 
@@ -52,7 +50,7 @@ private:
     std::thread audio_thread_;
     std::thread audio_processing_thread_;
 
-    // Thread management
+    // Thread management and IService interface implementation
     std::thread worker_thread_;
     void Run() override;
 

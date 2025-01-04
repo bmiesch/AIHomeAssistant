@@ -24,7 +24,7 @@ public:
                              const std::string& rhino_model_path = "/usr/local/lib/core/rhino_params.pv",
                              const std::string& rhino_context_path = "/usr/local/lib/core/Smart-Home_en_raspberry-pi_v3_0_0.rhn");
 
-    bool DetectKeyword(const std::vector<int16_t>& buffer, bool verbose = false) const;
+    bool DetectWakeWord(const std::vector<int16_t>& buffer, bool verbose = false) const;
     Command DetectCommand(const std::vector<int16_t>& buffer, bool verbose = false);
 
     KeywordDetector(const KeywordDetector&) = delete;
