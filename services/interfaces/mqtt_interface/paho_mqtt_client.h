@@ -6,7 +6,7 @@
 #include <nlohmann/json.hpp>
 #include "mqtt_interface.h"
 
-class PahoMqttClient : public IMqttClient, public virtual mqtt::callback {
+class PahoMqttClient : public IMqttClient, public mqtt::callback {
 private:
     mqtt::async_client mqtt_client_;
     mqtt::ssl_options mqtt_ssl_opts_;

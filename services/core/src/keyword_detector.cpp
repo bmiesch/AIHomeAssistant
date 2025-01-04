@@ -143,6 +143,7 @@ Command KeywordDetector::DetectCommand(const std::vector<int16_t>& buffer, bool 
             pv_rhino_reset(rhino_.get());
             return result;
         } else {
+            // TODO: Hand off to LLM/Agent for ...
             DEBUG_LOG("Command not understood");
             pv_rhino_reset(rhino_.get());
             return Command::NO_COMMAND;
