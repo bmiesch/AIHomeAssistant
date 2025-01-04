@@ -2,6 +2,7 @@
 
 #include <alsa/asoundlib.h>
 #include <vector>
+#include <memory>
 
 enum class AudioMode {
     STEREO,
@@ -12,11 +13,11 @@ enum class AudioMode {
 
 class AudioCapture {
 private:
-    snd_pcm_t *audio_capture_device_;
+    std::unique_ptr<snd_pcm_t, decltype(&snd_pcm_close)> audio_capture_device_;
+    snd_pcm_hw_params_t *params_;
     unsigned int sample_rate_;
     unsigned int channels_;
     snd_pcm_format_t format_;
-    snd_pcm_hw_params_t *params_;
 
     void InitParams();
     void PrintCurrentParameters();
@@ -24,7 +25,7 @@ private:
 
 public:
     AudioCapture(unsigned int rate = 16000, unsigned int chans = 1);
-    ~AudioCapture();
+    ~AudioCapture() = default;
 
     std::vector<int16_t> CaptureAudio(unsigned int duration_ms);
     std::vector<int16_t> CapturePorcupineFrame();
