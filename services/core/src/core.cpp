@@ -88,30 +88,26 @@ void Core::AudioProcessingLoop() {
         //     last_process_time = now;
         // }
 
-        if (running_ && keyword_detector_->DetectKeyword(frame, true)) {
-            INFO_LOG("Keyword detected! Listening for command...");
+        if (running_ && keyword_detector_->DetectWakeWord(frame, true)) {
+            INFO_LOG("Wake word detected! Listening for command...");
 
-            std::vector<int16_t> next_frame;
-            {
-                std::unique_lock<std::mutex> lock(audio_queue_mutex_);
-                audio_queue_cv_.wait(lock, [this] { return !audio_queue_.empty() || !running_; });
-                if (!running_) break;
-                next_frame = std::move(audio_queue_.front());
-                audio_queue_.pop();
-            }
-            
-            Command cmd = keyword_detector_->DetectCommand(next_frame, true);
-            while (cmd == Command::PROCESSING) {
+            Command cmd = Command::PROCESSING;
+            while (cmd == Command::PROCESSING && running_) {
+                // Get next audio frame
+                std::vector<int16_t> next_frame;
                 {
                     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
-                    audio_queue_cv_.wait(lock, [this] { return !audio_queue_.empty() || !running_; });
+                    audio_queue_cv_.wait(lock, [this] { 
+                        return !audio_queue_.empty() || !running_; 
+                    });
                     if (!running_) break;
                     next_frame = std::move(audio_queue_.front());
                     audio_queue_.pop();
                 }
+                
+                // Process the frame
                 cmd = keyword_detector_->DetectCommand(next_frame, true);
             }
-
             if (!running_) break;
             
             switch(cmd) {

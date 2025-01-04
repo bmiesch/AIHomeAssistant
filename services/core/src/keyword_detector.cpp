@@ -15,7 +15,7 @@ KeywordDetector::KeywordDetector(const std::string& porcupine_model_path,
     : porcupine_(nullptr, pv_porcupine_delete),
       rhino_(nullptr, pv_rhino_delete) {
 
-    // Porcupine
+    // Porcupine - Wake word detection
     const char* access_key = std::getenv("PICOVOICE_ACCESS_KEY");
     if (access_key == nullptr) {
         throw std::runtime_error("PICOVOICE_ACCESS_KEY is not set");
@@ -39,7 +39,7 @@ KeywordDetector::KeywordDetector(const std::string& porcupine_model_path,
     }
     porcupine_.reset(porcupine_raw);
 
-    // Rhino
+    // Rhino - Intent classification
     const char* r_model_path = rhino_model_path.c_str();
     const char* r_context_path = rhino_context_path.c_str();
     const float r_sensitivity = 0.7f;
@@ -62,7 +62,7 @@ KeywordDetector::KeywordDetector(const std::string& porcupine_model_path,
     rhino_.reset(rhino_raw);
 }
 
-bool KeywordDetector::DetectKeyword(const std::vector<int16_t>& buffer, bool verbose) const {
+bool KeywordDetector::DetectWakeWord(const std::vector<int16_t>& buffer, bool verbose) const {
     std::vector<int16_t> processed = buffer;
     (void)verbose;
     
@@ -93,62 +93,71 @@ bool KeywordDetector::DetectKeyword(const std::vector<int16_t>& buffer, bool ver
 Command KeywordDetector::DetectCommand(const std::vector<int16_t>& buffer, bool verbose) {
     bool is_finalized = false;
     pv_status_t status = pv_rhino_process(rhino_.get(), buffer.data(), &is_finalized);
-    
     if (status != PV_STATUS_SUCCESS) {
         ERROR_LOG("Failed to process audio in DetectCommand");
         throw std::runtime_error("Failed to process audio");
     }
+    
+    if (!is_finalized) {
+        return Command::PROCESSING;
+    }
 
-    if (is_finalized) {
-        bool is_understood = false;
-        status = pv_rhino_is_understood(rhino_.get(), &is_understood);
-        
-        if (status != PV_STATUS_SUCCESS) {
-            ERROR_LOG("Failed to check if command was understood");
-            throw std::runtime_error("Failed to check command understanding");
+    // Check if command was understood
+    bool is_understood = false;
+    status = pv_rhino_is_understood(rhino_.get(), &is_understood);
+    if (status != PV_STATUS_SUCCESS) {
+        ERROR_LOG("Failed to check if command was understood");
+        throw std::runtime_error("Failed to check command understanding");
+    }
+
+    if (!is_understood) {
+        DEBUG_LOG("Command not understood");
+        pv_rhino_reset(rhino_.get());
+        return Command::NO_COMMAND;
+    }
+
+    // Extract intent and slots
+    const char* intent = nullptr;
+    const char** slots = nullptr;
+    const char** values = nullptr;
+    int32_t num_slots = 0;
+    status = pv_rhino_get_intent(rhino_.get(), &intent, &num_slots, 
+                               (const char***)&slots, 
+                               (const char***)&values);
+    
+    // Use RAII to ensure cleanup on any exit path
+    struct IntentCleanup {
+        pv_rhino_t* rhino;
+        const char** slots;
+        const char** values;
+        ~IntentCleanup() {
+            pv_rhino_free_slots_and_values(rhino, 
+                const_cast<const char**>(slots), 
+                const_cast<const char**>(values));
+            pv_rhino_reset(rhino);
         }
+    } cleanup{rhino_.get(), slots, values};
 
-        if (is_understood) {
-            const char* intent = nullptr;
-            const char** slots = nullptr;
-            const char** values = nullptr;
-            int32_t num_slots = 0;
-            
-            status = pv_rhino_get_intent(rhino_.get(), &intent, &num_slots, 
-                                       (const char***)&slots, 
-                                       (const char***)&values);
-            
-            if (status != PV_STATUS_SUCCESS) {
-                ERROR_LOG("Failed to get intent from Rhino");
-                throw std::runtime_error("Failed to get intent");
-            }
+    if (status != PV_STATUS_SUCCESS) {
+        ERROR_LOG("Failed to get intent from Rhino");
+        throw std::runtime_error("Failed to get intent");
+    }
 
-            std::string intent_str(intent);
-            DEBUG_LOG("Detected intent: " + intent_str);
+    // Process the intent
+    std::string intent_str(intent);
+    DEBUG_LOG("Detected intent: " + intent_str);
 
-            Command result = Command::NO_COMMAND;
-            if (intent_str == "changeState" && num_slots > 0 && std::string(values[0]) == "on") {
-                if (verbose) INFO_LOG("Command detected: TURN_ON");
-                result = Command::TURN_ON;
-            } else if (intent_str == "changeState" && num_slots > 0 && std::string(values[0]) == "off") {
-                if (verbose) INFO_LOG("Command detected: TURN_OFF");
-                result = Command::TURN_OFF;
-            }
-
-            // Free the intent, slots, and values
-            pv_rhino_free_slots_and_values(rhino_.get(), 
-                                         const_cast<const char**>(slots), 
-                                         const_cast<const char**>(values));
-
-            pv_rhino_reset(rhino_.get());
-            return result;
-        } else {
-            // TODO: Hand off to LLM/Agent for ...
-            DEBUG_LOG("Command not understood");
-            pv_rhino_reset(rhino_.get());
-            return Command::NO_COMMAND;
+    if (intent_str == "changeState" && num_slots > 0) {
+        std::string value(values[0]);
+        if (value == "on") {
+            if (verbose) INFO_LOG("Command detected: TURN_ON");
+            return Command::TURN_ON;
+        }
+        if (value == "off") {
+            if (verbose) INFO_LOG("Command detected: TURN_OFF");
+            return Command::TURN_OFF;
         }
     }
-    
-    return Command::PROCESSING;
+
+    return Command::NO_COMMAND;
 }
