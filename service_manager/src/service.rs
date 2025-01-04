@@ -119,9 +119,9 @@ impl ServiceManager {
     /// Deploy a service to a remote device
     pub async fn deploy_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
         let service = self.get_service_mut(service_name)?;
-        println!("Deploying service: {}", service_name);
+        info!("Deploying service: {}", service_name);
 
-        println!("Cross-compiling service...");
+        info!("Cross-compiling service...");
         let script_path = ROOT_DIR.join("cross-compile");
         let status = std::process::Command::new("bash")
             .current_dir(&*ROOT_DIR)
@@ -251,7 +251,7 @@ impl ServiceManager {
         service.device.execute_command("sudo systemctl daemon-reload")?;
         // service.device.execute_command(&format!("sudo systemctl enable {}", service.name))?;
     
-        println!("Service {} deployed successfully", service.name);
+        info!("Service {} deployed successfully", service.name);
         service.status = ServiceStatus::Deployed;
         Ok(())
     }
@@ -270,7 +270,7 @@ impl ServiceManager {
         }
 
         service.device.execute_command(&format!("sudo systemctl start {}", service.name))?;
-        println!("Service {} started successfully", service.name);
+        info!("Service {} started successfully", service.name);
         service.status = ServiceStatus::Running;
         Ok(())
     }
@@ -289,7 +289,7 @@ impl ServiceManager {
         }
 
         service.device.execute_command(&format!("sudo systemctl stop {}", service.name))?;
-        println!("Service {} stopped successfully", service.name);
+        info!("Service {} stopped successfully", service.name);
         service.status = ServiceStatus::Stopped;
         Ok(())
     }

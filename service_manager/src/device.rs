@@ -7,6 +7,7 @@ use crate::error::*;
 use std::fmt;
 use std::net::TcpStream;
 use std::io::Read;
+use tracing::info;
 
 pub static ROOT_DIR: Lazy<PathBuf> = Lazy::new(|| {
     PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string()))
@@ -75,7 +76,6 @@ impl Device {
     }
 
     fn create_ssh_session(&mut self) -> Result<&Session, DeviceError> {
-        // let tcp = TcpStream::connect(&format!("{}:22", self.config.ip_address))?;
         let addr = format!("{}:22", self.config.ip_address)
         .parse()
         .map_err(|e| DeviceError::SshError(format!(
@@ -135,7 +135,7 @@ impl Device {
 impl DeviceRegistry {
     pub fn new(load_from_file: bool) -> Result<Self, DeviceError> {
         if load_from_file {
-            println!("Root dir: {}", ROOT_DIR.display());
+            info!("Root dir: {}", ROOT_DIR.display());
             let config_path = ROOT_DIR.join("service_manager/config/devices.yaml");
             let config_content = std::fs::read_to_string(config_path)?;
             let registry: DeviceRegistry = serde_yaml::from_str(&config_content)?;

@@ -3,14 +3,14 @@ use tokio_tungstenite::accept_async;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::broadcast;
 use crate::error::ServiceManagerError;
-
+use tracing::{info, debug, error};
 pub struct WebSocketServer;
 
 impl WebSocketServer {
     pub async fn run(addr: &str, event_rx: broadcast::Receiver<String>) -> Result<(), ServiceManagerError> {
         let listener = TcpListener::bind(addr).await
             .map_err(|e| ServiceManagerError::WebSocketError(e.to_string()))?;
-        tracing::info!("WebSocket server listening on {}", addr);
+        info!("WebSocket server listening on {}", addr);
 
         while let Ok((stream, addr)) = listener.accept().await {
             tracing::debug!("New WebSocket connection from {}", addr);
@@ -24,10 +24,10 @@ impl WebSocketServer {
                 read.for_each(|message| async {
                     match message {
                         Ok(msg) => {
-                            tracing::debug!("Received WebSocket message from {}: {:?}", addr, msg);
+                            debug!("Received WebSocket message from {}: {:?}", addr, msg);
                         }
                         Err(e) => {
-                            tracing::error!("WebSocket error from {}: {}", addr, e);
+                            error!("WebSocket error from {}: {}", addr, e);
                         }
                     }
                 }).await;
@@ -37,7 +37,7 @@ impl WebSocketServer {
             tokio::spawn(async move {
                 while let Ok(msg) = client_rx.recv().await {
                     if let Err(e) = write.send(tokio_tungstenite::tungstenite::Message::Text(msg)).await {
-                        tracing::error!("Failed to send WebSocket message: {}", e);
+                        error!("Failed to send WebSocket message: {}", e);
                         break;
                     }
                 }
