@@ -11,7 +11,7 @@ use std::env;
 use std::process::Command;
 use std::io;
 use tracing_subscriber;
-use tracing::info;
+use tracing::{info, error};
 use dotenv::dotenv;
 
 //------------------------------------------------------------------------------
@@ -100,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize service manager
     let service_manager = ServiceManager::new(true, event_tx)
         .map_err(|e| {
-            eprintln!("Failed to initialize ServiceManager: {}", e);
+            error!("Failed to initialize ServiceManager: {}", e);
             e
         })?;
 
@@ -108,7 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let websocket_addr = "127.0.0.1:9001";
     tokio::spawn(async move {
         if let Err(e) = WebSocketServer::run(websocket_addr, event_rx).await {
-            eprintln!("Failed to start WebSocket server: {}", e);
+            error!("Failed to start WebSocket server: {}", e);
         }
     });
 

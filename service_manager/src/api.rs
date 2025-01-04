@@ -7,6 +7,7 @@ use axum::{
 use paho_mqtt::Message;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::info;
 
 use crate::service::ServiceManager;
 use serde::{Deserialize, Serialize};
@@ -71,7 +72,7 @@ pub fn create_router(service_manager: ServiceManager) -> Router {
 async fn list_services(
     State(state): State<SharedState>,
 ) -> Json<Vec<ServiceResponse>> {
-    println!("Listing services");
+    info!("Listing services");
     let service_manager = state.lock().await;
     let services = service_manager.get_services()
         .iter()
@@ -91,7 +92,7 @@ async fn create_service(
     Path(name): Path<String>,
     Json(req): Json<CreateServiceRequest>,
 ) -> Result<Json<String>, ServiceManagerError> {
-    println!("Creating service");
+    info!("Creating service");
     let mut service_manager = state.lock().await;
     match service_manager.create_service(name, req.device_name) {
         Ok(_) => Ok(Json("Service created".to_string())),
@@ -104,7 +105,7 @@ async fn remove_service(
     State(state): State<SharedState>,
     Path(name): Path<String>,
 ) -> Result<Json<String>, ServiceManagerError> {
-    println!("Removing service");
+    info!("Removing service");
     let mut service_manager = state.lock().await;
     service_manager.remove_service(&name);
     Ok(Json("Service removed".to_string()))
@@ -115,7 +116,7 @@ async fn deploy_service(
     State(state): State<SharedState>,
     Path(name): Path<String>,
 ) -> Result<Json<String>, ServiceManagerError> {
-    println!("Deploying service");
+    info!("Deploying service");
     let mut service_manager = state.lock().await;
     service_manager.deploy_service(&name).await?;
     Ok(Json("Service deployed".to_string()))
@@ -126,7 +127,7 @@ async fn start_service(
     State(state): State<SharedState>,
     Path(name): Path<String>,
 ) -> Result<Json<String>, ServiceManagerError> {
-    println!("Starting service");
+    info!("Starting service");
     let mut service_manager = state.lock().await;
     service_manager.start_service(&name).await?;
     Ok(Json("Service started".to_string()))
@@ -137,7 +138,7 @@ async fn stop_service(
     State(state): State<SharedState>,
     Path(name): Path<String>,
 ) -> Result<Json<String>, ServiceManagerError> {
-    println!("Stopping service");
+    info!("Stopping service");
     let mut service_manager = state.lock().await;
     service_manager.stop_service(&name).await?;
     Ok(Json("Service stopped".to_string()))
@@ -153,6 +154,7 @@ async fn publish_message(
         let service_manager = state.lock().await;
         service_manager.mqtt_client.clone()
     };
+    info!("Publishing message");
     mqtt_client.publish(&msg).await?;
     Ok(Json("Message published".to_string()))
 }
