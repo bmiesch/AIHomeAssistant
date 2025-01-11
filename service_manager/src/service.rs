@@ -25,6 +25,7 @@ pub enum ServiceStatus {
 pub struct Service {
     pub name: String,
     pub status: ServiceStatus,
+    pub enabled: bool,
     pub device: Device,
 }
 
@@ -99,6 +100,7 @@ impl ServiceManager {
         let service = Service {
             name: service_name,
             status: ServiceStatus::Created,
+            enabled: false,
             device: device.clone(),
         };
         self.services.insert(service.name.clone(), service);
@@ -214,25 +216,28 @@ impl ServiceManager {
         service.device.execute_command(&format!("sudo mkdir -p {}", remote_lib_dir))?;
         service.device.execute_command(&format!("sudo chown {} {}", service.device.config.username, remote_lib_dir))?;
 
-        let status = Command::new("sshpass")
-            .args([
-                "-p", &service.device.config.password,
-                "scp",
-                "-r",
-                &format!("{}/.", local_lib_dir.to_str().unwrap()),
-                &format!("{}@{}:{}",
-                    service.device.config.username,
-                    service.device.config.ip_address,
-                    remote_lib_dir
-                )   
-            ])
-            .status()?;
+        if local_lib_dir.exists() {
+            let status = Command::new("sshpass")
+                .args([
+                    "-p", &service.device.config.password,
+                    "scp",
+                    "-r",
+                    &format!("{}/.", local_lib_dir.to_str().unwrap()),
+                    &format!("{}@{}:{}",
+                        service.device.config.username,
+                        service.device.config.ip_address,
+                        remote_lib_dir
+                    )   
+                ])
+                .status()?;
 
-        if !status.success() {
-            return Err(ServiceManagerError::DeploymentError(
-                "Failed to copy library files".to_string()
-            ));
+            if !status.success() {
+                return Err(ServiceManagerError::DeploymentError(
+                    "Failed to copy library files".to_string()
+                ));
+            }
         }
+
         // First disable and unmask the service if it exists
         info!("Cleaning up existing service state");
         service.device.execute_command(&format!(
@@ -249,8 +254,7 @@ impl ServiceManager {
         ))?;
         
         service.device.execute_command("sudo systemctl daemon-reload")?;
-        // service.device.execute_command(&format!("sudo systemctl enable {}", service.name))?;
-    
+
         info!("Service {} deployed successfully", service.name);
         service.status = ServiceStatus::Deployed;
         Ok(())
@@ -291,6 +295,22 @@ impl ServiceManager {
         service.device.execute_command(&format!("sudo systemctl stop {}", service.name))?;
         info!("Service {} stopped successfully", service.name);
         service.status = ServiceStatus::Stopped;
+        Ok(())
+    }
+
+    /// Enable a service on a remote device by enabling its systemd service
+    pub async fn enable_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
+        let service = self.get_service_mut(service_name)?;
+        service.device.execute_command(&format!("sudo systemctl enable {}", service.name))?;
+        service.enabled = true;
+        Ok(())
+    }
+
+    /// Disable a service on a remote device by disabling its systemd service
+    pub async fn disable_service(&mut self, service_name: &str) -> Result<(), ServiceManagerError> {
+        let service = self.get_service_mut(service_name)?;
+        service.device.execute_command(&format!("sudo systemctl disable {}", service.name))?;
+        service.enabled = false;
         Ok(())
     }
 }
