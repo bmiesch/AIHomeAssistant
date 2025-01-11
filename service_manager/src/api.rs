@@ -23,6 +23,7 @@ pub struct CreateServiceRequest {
 pub struct ServiceResponse {
     name: String,
     status: String,
+    enabled: bool,
     device: String,
 }
 
@@ -63,6 +64,8 @@ pub fn create_router(service_manager: ServiceManager) -> Router {
         .route("/services/:name/deploy", post(deploy_service))
         .route("/services/:name/start", post(start_service))
         .route("/services/:name/stop", post(stop_service))
+        .route("/services/:name/enable", post(enable_service))
+        .route("/services/:name/disable", post(disable_service))
         .route("/mqtt/publish", post(publish_message))
         .with_state(shared_state)
         .layer(cors)
@@ -80,6 +83,7 @@ async fn list_services(
             name: s.name.clone(),
             status: format!("{:?}", s.status),
             device: s.device.config.ip_address.clone(),
+            enabled: s.enabled,
         })
         .collect();
     
@@ -157,4 +161,26 @@ async fn publish_message(
     info!("Publishing message");
     mqtt_client.publish(&msg).await?;
     Ok(Json("Message published".to_string()))
+}
+
+/// Enable a service
+async fn enable_service(
+    State(state): State<SharedState>,
+    Path(name): Path<String>,
+) -> Result<Json<String>, ServiceManagerError> {
+    info!("Enabling service");
+    let mut service_manager = state.lock().await;
+    service_manager.enable_service(&name).await?;
+    Ok(Json("Service enabled".to_string()))
+}
+
+/// Disable a service
+async fn disable_service(
+    State(state): State<SharedState>,
+    Path(name): Path<String>,
+) -> Result<Json<String>, ServiceManagerError> {
+    info!("Disabling service");
+    let mut service_manager = state.lock().await;
+    service_manager.disable_service(&name).await?;
+    Ok(Json("Service disabled".to_string()))
 }

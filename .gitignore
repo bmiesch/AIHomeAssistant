@@ -12,6 +12,7 @@ dump/
 !**/lib/.gitkeep
 notes.md
 roadmap.md
+ideas.md
 
 # Build artifacts
 **/target/

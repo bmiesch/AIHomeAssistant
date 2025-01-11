@@ -9,8 +9,9 @@ use gloo_console as console;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Service {
     pub name: String,
-    pub device: String,
     pub status: String,
+    pub enabled: bool,
+    pub device: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -96,6 +97,24 @@ mod api {
                 topic: topic.to_string(),
                 payload: payload.to_string(),
             })
+            .send()
+            .await?;
+        Ok(())
+    }
+
+    pub async fn enable_service(name: &str) -> Result<(), reqwest::Error> {
+        reqwest::Client::new()
+            .post(&format!("{}/services/{}/enable", API_BASE, name))
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        Ok(())
+    }
+
+    pub async fn disable_service(name: &str) -> Result<(), reqwest::Error> {
+        reqwest::Client::new()
+            .post(&format!("{}/services/{}/disable", API_BASE, name))
+            .header("Accept", "application/json")
             .send()
             .await?;
         Ok(())
@@ -188,14 +207,14 @@ fn MqttPublisher() -> impl IntoView {
                         type="text"
                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                         required
-                        placeholder="device/command"
+                        placeholder="home/services/led_manager/command"
                         prop:value=move || topic.get()
                         on:input=move |ev| {
                             set_topic.set(event_target_value(&ev));
                         }
                     />
                     <p class="mt-1 text-sm text-gray-500">
-                        "Example topics: device/speed/set, sensor/temperature"
+                        "Example topics: home/services/{service}/command, home/services/{service}/status"
                     </p>
                 </div>
 
@@ -429,19 +448,37 @@ fn ServiceCard(
         _ => "bg-gray-100 text-gray-800",
     };
 
+    let enabled_class = move || if service.get().enabled {
+        "bg-green-100 text-green-800"
+    } else {
+        "bg-red-100 text-red-800"
+    };
+
     let deploy = create_action(move |_| {
         let name = service.get().name.clone();
-        async move { api::deploy_service(&name).await }
+        async move {
+            api::deploy_service(&name).await?;
+            on_status_change.dispatch(());
+            Ok::<(), reqwest::Error>(())
+        }
     });
 
     let start = create_action(move |_| {
         let name = service.get().name.clone();
-        async move { api::start_service(&name).await }
+        async move {
+            api::start_service(&name).await?;
+            on_status_change.dispatch(());
+            Ok::<(), reqwest::Error>(())
+        }
     });
 
     let stop = create_action(move |_| {
         let name = service.get().name.clone();
-        async move { api::stop_service(&name).await }
+        async move {
+            api::stop_service(&name).await?;
+            on_status_change.dispatch(());
+            Ok::<(), reqwest::Error>(())
+        }
     });
 
     let remove = create_action(move |_| {
@@ -453,9 +490,21 @@ fn ServiceCard(
         }
     });
 
-    create_effect(move |_| {
-        if start.version().get() > 0 || stop.version().get() > 0 {
+    let enable = create_action(move |_| {
+        let name = service.get().name.clone();
+        async move {
+            api::enable_service(&name).await?;
             on_status_change.dispatch(());
+            Ok::<(), reqwest::Error>(())
+        }
+    });
+
+    let disable = create_action(move |_| {
+        let name = service.get().name.clone();
+        async move {
+            api::disable_service(&name).await?;
+            on_status_change.dispatch(());
+            Ok::<(), reqwest::Error>(())
         }
     });
 
@@ -463,9 +512,14 @@ fn ServiceCard(
         <div class="bg-white rounded-lg shadow p-4">
             <h3 class="text-lg font-semibold mb-2">{move || service.get().name.clone()}</h3>
             <div class="flex justify-between items-center mb-4">
-                <span class={move || format!("px-2 py-1 rounded-full {}", status_class())}>
-                    {move || service.get().status.clone()}
-                </span>
+                <div class="flex space-x-2">
+                    <span class={move || format!("px-2 py-1 rounded-full {}", status_class())}>
+                        {move || service.get().status.clone()}
+                    </span>
+                    <span class={move || format!("px-2 py-1 rounded-full {}", enabled_class())}>
+                        {move || service.get().enabled.to_string()}
+                    </span>
+                </div>
                 <span class="text-gray-600">
                     {move || service.get().device.clone()}
                 </span>
@@ -501,6 +555,20 @@ fn ServiceCard(
                     on:click=move |_| remove.dispatch(())
                 >
                     "Remove"
+                </button>
+                <button
+                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded
+                           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-500"
+                    on:click=move |_| enable.dispatch(())
+                >
+                    "Enable"
+                </button>
+                <button
+                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded
+                           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-500"
+                    on:click=move |_| disable.dispatch(())
+                >
+                    "Disable"
                 </button>
             </div>
         </div>
