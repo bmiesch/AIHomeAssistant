@@ -102,7 +102,8 @@ void LEDManager::Stop() {
     }
     
     try {
-        Publish(STATUS_TOPIC, "{\"status\": \"offline\"}");
+        nlohmann::json status_msg = {{"status", "offline"}};
+        Publish(STATUS_TOPIC, status_msg);
         Disconnect();
         DEBUG_LOG("MQTT client disconnected");
     } catch (const mqtt::exception& e) {

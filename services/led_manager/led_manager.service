@@ -1,7 +1,7 @@
 [Unit]
 Description=LED Manager Service
-After=bluetooth.target
-Requires=bluetooth.target
+After=bluetooth.target network-online.target NetworkManager-wait-online.service
+Requires=bluetooth.target network-online.target NetworkManager-wait-online.service
 
 [Service]
 Type=simple
