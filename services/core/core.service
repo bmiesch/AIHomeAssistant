@@ -1,7 +1,8 @@
 [Unit]
 Description=core
-After=sound.target
-Requires=sound.target
+BindsTo=dev-snd-controlC1.device
+After=dev-snd-controlC1.device network-online.target NetworkManager-wait-online.service
+Requires=network-online.target NetworkManager-wait-online.service
 
 [Service]
 Type=simple

@@ -12,7 +12,7 @@ AudioCapture::AudioCapture(unsigned int rate, unsigned int chans)
 
 void AudioCapture::InitParams() {
     snd_pcm_t *raw_device;
-    int rc = snd_pcm_open(&raw_device, "default", SND_PCM_STREAM_CAPTURE, 0);
+    int rc = snd_pcm_open(&raw_device, "plughw:1,0", SND_PCM_STREAM_CAPTURE, 0);
     if (rc < 0) {
         ERROR_LOG("Cannot open audio device: " + std::string(snd_strerror(rc)));
         throw std::runtime_error("Cannot open audio device: " + std::string(snd_strerror(rc)));
