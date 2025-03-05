@@ -109,9 +109,26 @@ impl Device {
 
     pub fn execute_command(&mut self, cmd: &str) -> Result<(), DeviceError> {
         let ssh = self.get_ssh_session()?;
-
         let mut channel = ssh.channel_session()?;
-        channel.exec(cmd)?;
+        
+        let exec_cmd = if cmd.contains("sudo") {
+            if cmd.contains("| sudo tee") {
+                // Special handling for tee commands to ensure sudo applies to the whole pipeline
+                let parts: Vec<&str> = cmd.split("| sudo tee").collect();
+                let content = parts[0].trim().trim_start_matches("echo ").trim_matches('\'');
+                let path = parts[1].trim();
+                format!("sh -c \"echo '{}' | (echo '{}' | sudo -S tee {})\"", 
+                    self.config.password, content, path)
+            } else {
+                // Regular sudo commands
+                format!("sh -c \"echo '{}' | sudo -S {}\"", 
+                    self.config.password, cmd.replace("sudo ", ""))
+            }
+        } else {
+            cmd.to_string()
+        };
+
+        channel.exec(&exec_cmd)?;
 
         let mut stdout = String::new();
         channel.read_to_string(&mut stdout)?;
