@@ -2,9 +2,8 @@ mod parser;
 
 use leptos::*;
 use wasm_bindgen::prelude::*;
-use web_sys::WebSocket;
+use web_sys::{WebSocket, CloseEvent};
 use serde::{Deserialize, Serialize};
-use gloo_console as console;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Service {
@@ -320,41 +319,114 @@ fn MqttPublisher() -> impl IntoView {
 #[component]
 fn WebSocketComponent() -> impl IntoView {
     let (messages, set_messages) = create_signal(String::new());
+    let (connection_status, set_connection_status) = create_signal(String::from("Connecting..."));
+    let ws = create_rw_signal(None::<WebSocket>);
+    let reconnect_timer = create_rw_signal(None::<i32>);
 
     let clear_messages = move |_| set_messages.set(String::new());
 
-    spawn_local(async move {
-        let ws = WebSocket::new("ws://localhost:9001")
-            .expect("Failed to create WebSocket connection");
+    // Create a signal to trigger reconnection
+    let (should_reconnect, set_should_reconnect) = create_signal(true);
 
-        let onmessage_callback = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
-            if let Some(data) = e.data().as_string() {
-                // Debug print raw message
-                console::log!("Raw message:", &data);
-                
-                let formatted_message = parser::format_message(&data);
-                
-                // Debug print formatted message
-                console::log!("Formatted:", &formatted_message);
-                set_messages.update(|msg| msg.push_str(&format!("{}\n", formatted_message)));
+    // Effect to handle WebSocket connection and reconnection
+    create_effect(move |_| {
+        if !should_reconnect.get() {
+            return;
+        }
+        set_should_reconnect.set(false);
+
+        spawn_local(async move {
+            match WebSocket::new("ws://localhost:9001") {
+                Ok(socket) => {
+                    let onmessage_callback = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
+                        if let Some(data) = e.data().as_string() {
+                            if let Some(topic_start) = data.find("topic '") {
+                                if let Some(topic_end) = data[topic_start..].find("': ") {
+                                    let topic = &data[topic_start + 7..topic_start + topic_end];
+                                    let content = &data[topic_start + topic_end + 3..];
+                                    
+                                    if topic == "home/services/security_camera/snapshot" {
+                                        return;
+                                    }
+                                    
+                                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
+                                        let formatted_message = parser::format_message(&data);
+                                        set_messages.update(|msg| msg.push_str(&format!("{}\n", formatted_message)));
+                                    }
+                                }
+                            }
+                        }
+                    }) as Box<dyn FnMut(_)>);
+
+                    let set_should_reconnect_clone = set_should_reconnect.clone();
+                    let onclose_callback = Closure::wrap(Box::new(move |_: CloseEvent| {
+                        set_connection_status.set("Disconnected. Reconnecting...".to_string());
+                        if let Ok(handle) = window().set_timeout_with_callback_and_timeout_and_arguments_0(
+                            Closure::once_into_js(move || {
+                                set_should_reconnect_clone.set(true);
+                            }).as_ref().unchecked_ref(),
+                            5000,
+                        ) {
+                            reconnect_timer.set(Some(handle));
+                        }
+                    }) as Box<dyn FnMut(CloseEvent)>);
+
+                    let onerror_callback = Closure::wrap(Box::new(move |_: web_sys::ErrorEvent| {
+                        set_connection_status.set("Connection error".to_string());
+                    }) as Box<dyn FnMut(_)>);
+
+                    socket.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
+                    socket.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
+                    socket.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
+
+                    onmessage_callback.forget();
+                    onclose_callback.forget();
+                    onerror_callback.forget();
+
+                    ws.set(Some(socket));
+                    set_connection_status.set("Connected".to_string());
+                }
+                Err(_) => {
+                    set_connection_status.set("Failed to connect. Retrying...".to_string());
+                    if let Ok(handle) = window().set_timeout_with_callback_and_timeout_and_arguments_0(
+                        Closure::once_into_js(move || {
+                            set_should_reconnect.set(true);
+                        }).as_ref().unchecked_ref(),
+                        5000,
+                    ) {
+                        reconnect_timer.set(Some(handle));
+                    }
+                }
             }
-        }) as Box<dyn FnMut(_)>);
+        });
+    });
 
-        let onerror_callback = Closure::wrap(Box::new(move |e: web_sys::ErrorEvent| {
-            println!("WebSocket error: {:?}", e);
-        }) as Box<dyn FnMut(_)>);
-
-        ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
-        ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
-
-        onmessage_callback.forget();
-        onerror_callback.forget();
+    // Cleanup on component drop
+    on_cleanup(move || {
+        if let Some(handle) = reconnect_timer.get() {
+            window().clear_timeout_with_handle(handle);
+        }
+        if let Some(socket) = ws.get() {
+            let _ = socket.close();
+        }
     });
 
     view! {
         <div class="bg-white rounded-lg shadow p-4 mt-4">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-lg font-semibold">"Service Logs"</h2>
+                <div class="flex items-center space-x-4">
+                    <h2 class="text-lg font-semibold">"Service Logs"</h2>
+                    <span class=move || {
+                        let status = connection_status.get();
+                        let base = "text-sm px-2 py-1 rounded";
+                        match status.as_str() {
+                            "Connected" => format!("{} bg-green-100 text-green-800", base),
+                            _ => format!("{} bg-yellow-100 text-yellow-800", base)
+                        }
+                    }>
+                        {move || connection_status.get()}
+                    </span>
+                </div>
                 <button
                     class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm"
                     on:click=clear_messages
@@ -576,6 +648,99 @@ fn ServiceCard(
 }
 
 #[component]
+fn VideoViewer() -> impl IntoView {
+    let (image_data, set_image_data) = create_signal(String::new());
+    let (status, set_status) = create_signal(String::from("Waiting for images..."));
+
+    // Action to request a snapshot
+    let request_snapshot = create_action(move |_| async move {
+        set_status.set("Requesting snapshot...".to_string());
+        
+        let payload = serde_json::json!({
+            "action": "snapshot"
+        });
+        
+        match api::publish_mqtt(
+            "home/services/security_camera/command",
+            &payload.to_string()
+        ).await {
+            Ok(_) => set_status.set("Snapshot requested".to_string()),
+            Err(e) => set_status.set(format!("Error: {}", e))
+        }
+    });
+
+    // Set up WebSocket connection
+    spawn_local(async move {
+        match WebSocket::new("ws://localhost:9001") {
+            Ok(socket) => {
+                let onmessage_callback = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
+                    if let Some(data) = e.data().as_string() {
+                        // Extract the actual JSON payload from the message
+                        if let Some(topic_start) = data.find("topic '") {
+                            if let Some(topic_end) = data[topic_start..].find("': ") {
+                                let topic = &data[topic_start + 7..topic_start + topic_end];
+                                let content = &data[topic_start + topic_end + 3..];
+                                
+                                // Check if this is a snapshot message
+                                if topic == "home/services/security_camera/snapshot" {
+                                    if let Ok(_json) = serde_json::from_str::<serde_json::Value>(content) {
+                                        if let Some(image) = _json.get("image").and_then(|i| i.as_str()) {
+                                            set_image_data.set(image.to_string());
+                                            set_status.set("Image received".to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }) as Box<dyn FnMut(_)>);
+
+                socket.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
+                onmessage_callback.forget();
+            },
+            Err(_) => {
+                set_status.set("Failed to connect to WebSocket server".to_string());
+            }
+        }
+    });
+
+    view! {
+        <div class="bg-white rounded-lg shadow p-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold">"Security Camera Feed"</h2>
+                <button
+                    class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                    on:click=move |_| request_snapshot.dispatch(())
+                >
+                    "Take Snapshot"
+                </button>
+            </div>
+            <div class="relative aspect-video bg-gray-100 rounded overflow-hidden">
+                {move || {
+                    if image_data.get().is_empty() {
+                        view! {
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <span class="text-gray-500">{move || status.get()}</span>
+                            </div>
+                        }
+                    } else {
+                        view! {
+                            <div class="absolute inset-0">
+                                <img 
+                                    src={image_data.get()} 
+                                    class="w-full h-full object-contain"
+                                    alt="Security Camera Feed"
+                                />
+                            </div>
+                        }
+                    }
+                }}
+            </div>
+        </div>
+    }
+}
+
+#[component]
 fn App() -> impl IntoView {
     let (services, set_services) = create_signal(Vec::new());
     let (error, set_error) = create_signal(None::<String>);
@@ -639,6 +804,7 @@ fn App() -> impl IntoView {
             </div>
 
             <div class="w-1/3 p-4">
+                <VideoViewer />
                 <WebSocketComponent />
             </div>
 
