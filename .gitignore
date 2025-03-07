@@ -13,6 +13,7 @@ dump/
 notes.md
 roadmap.md
 ideas.md
+**/targets/
 
 # Build artifacts
 **/target/

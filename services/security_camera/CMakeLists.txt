@@ -5,7 +5,7 @@ if(CCACHE_PROGRAM)
     message(STATUS "Using ccache: ${CCACHE_PROGRAM}")
 endif()
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.13)
 project(security_camera_service)
 
 include(ExternalProject)
@@ -30,12 +30,28 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic")
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
-find_package(OpenCV REQUIRED)
+find_package(OpenCV 4.1.1 REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_package(nlohmann_json REQUIRED)
 
 # Set up external dependencies installation prefix
 set(EXTERNAL_INSTALL_LOCATION ${CMAKE_BINARY_DIR}/external)
+
+# nlohmann-json
+ExternalProject_Add(json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+    GIT_SHALLOW ON
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${EXTERNAL_INSTALL_LOCATION}
+        -DJSON_BuildTests=OFF
+        -DJSON_MultipleHeaders=OFF
+        -DCMAKE_CXX_STANDARD=17
+        -DCMAKE_CXX_STANDARD_REQUIRED=ON
+    BUILD_COMMAND
+        ${CMAKE_COMMAND} --build <BINARY_DIR>
+    INSTALL_COMMAND
+        ${CMAKE_COMMAND} --build <BINARY_DIR> --target install
+)
 
 # Paho MQTT C++
 ExternalProject_Add(paho-mqtt-cpp
@@ -72,6 +88,7 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 # Add dependencies on external projects
 add_dependencies(${PROJECT_NAME}
     paho-mqtt-cpp
+    json
 )
 
 # Add include directories
@@ -100,7 +117,6 @@ target_link_libraries(${PROJECT_NAME}
         OpenSSL::SSL
         OpenSSL::Crypto
         pthread
-        nlohmann_json::nlohmann_json
 )
 
 # Installation rules

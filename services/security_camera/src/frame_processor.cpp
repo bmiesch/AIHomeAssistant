@@ -37,7 +37,7 @@ bool FrameProcessor::Initialize() {
     INFO_LOG("Initializing frame processor");
     
     // Load face cascade classifier
-    std::string cascade_path = cv::samples::findFile("haarcascades/haarcascade_frontalface_default.xml");
+    std::string cascade_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
     if (!face_cascade_.load(cascade_path)) {
         ERROR_LOG("Error loading face cascade classifier");
         // Continue without face detection

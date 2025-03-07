@@ -34,11 +34,9 @@ SecurityCamera::SecurityCamera(const std::string& broker_address, const std::str
     GetEnvVar("FRAME_WIDTH", width);
     GetEnvVar("FRAME_HEIGHT", height);
     GetEnvVar("FPS_TARGET", fps);
-    GetEnvVar("NIGHT_MODE_THRESHOLD", night_mode_threshold_);
     
     // Initialize camera with settings
     camera_capture_ = std::make_unique<CameraCapture>(camera_id, width, height, fps);
-    camera_capture_->SetNightModeThreshold(night_mode_threshold_);
     
     // Set up callbacks
     frame_processor_->SetMotionCallback([this](bool motion_detected, const json& details) {
@@ -68,17 +66,10 @@ void SecurityCamera::Initialize() {
         throw std::runtime_error("Failed to initialize frame processor");
     }
     
-    // Connect to MQTT broker
-    Connect();
-    
     // Start threads
-    running_ = true;
     capture_thread_ = std::thread(&SecurityCamera::CaptureLoop, this);
     processing_thread_ = std::thread(&SecurityCamera::ProcessingLoop, this);
     worker_thread_ = std::thread(&SecurityCamera::Run, this);
-    
-    // Publish status
-    PublishStatus("online");
     
     INFO_LOG("Security Camera Service initialized");
 }
@@ -110,17 +101,68 @@ void SecurityCamera::Stop() {
 
 void SecurityCamera::Run() {
     INFO_LOG("Worker thread started");
+    running_ = true;
+
+    auto last_status_time = std::chrono::steady_clock::now();
+    const auto status_interval = std::chrono::seconds(5);
     
     while (running_) {
-        // This thread can be used for periodic tasks like publishing status updates
-        std::this_thread::sleep_for(std::chrono::seconds(60));
         
-        if (running_) {
-            PublishStatus("online");
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_status_time >= status_interval) {
+            try {
+                PublishStatus("online");
+            } catch (const std::exception& e) {
+                ERROR_LOG("Exception in status update: " + std::string(e.what()));
+            }
+            last_status_time = now;
         }
+
+        // Process any pending commands
+        json command;
+        bool has_command = false;
+        
+        {
+            std::unique_lock<std::mutex> lock(command_queue_mutex_);
+            if (!command_queue_.empty()) {
+                command = command_queue_.front();
+                command_queue_.pop();
+                has_command = true;
+            }
+        }
+        
+        if (has_command) {
+            ProcessCommand(command);
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     
     INFO_LOG("Worker thread stopped");
+}
+
+void SecurityCamera::ProcessCommand(const json& command) {
+    try {
+        if (command.contains("action")) {
+            std::string action = command["action"];
+            
+            if (action == "snapshot") {
+                INFO_LOG("Processing snapshot request");
+                // Capture and publish a snapshot
+                cv::Mat frame = camera_capture_->CaptureFrame();
+                if (!frame.empty()) {
+                    PublishSnapshot(frame);
+                    INFO_LOG("Snapshot published successfully");
+                }
+                else {
+                    ERROR_LOG("Failed to capture snapshot");
+                }
+            }
+            // Other commands are handled directly in IncomingMessage
+        }
+    } catch (const std::exception& e) {
+        ERROR_LOG("Error processing command: " + std::string(e.what()));
+    }
 }
 
 void SecurityCamera::CaptureLoop() {
@@ -135,14 +177,6 @@ void SecurityCamera::CaptureLoop() {
                 WARN_LOG("Empty frame captured");
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
-            }
-            
-            // Check for night mode
-            bool is_night = camera_capture_->DetectNightMode(frame);
-            if (is_night != night_mode_) {
-                night_mode_ = is_night;
-                camera_capture_->SetNightMode(night_mode_);
-                INFO_LOG(std::string("Night mode ") + (night_mode_ ? "enabled" : "disabled"));
             }
             
             // Add frame to queue
@@ -220,11 +254,13 @@ void SecurityCamera::IncomingMessage(const std::string& topic, const std::string
                 std::string action = command["action"];
                 
                 if (action == "snapshot") {
-                    // Capture and publish a snapshot
-                    cv::Mat frame = camera_capture_->CaptureFrame();
-                    if (!frame.empty()) {
-                        PublishSnapshot(frame);
-                    }
+                    INFO_LOG("Snapshot requested - queuing task");
+                    
+                    // Queue the snapshot task to be processed by the worker thread
+                    // instead of processing it directly in the MQTT callback thread
+                    std::lock_guard<std::mutex> lock(command_queue_mutex_);
+                    command_queue_.push(command);
+                    command_queue_cv_.notify_one();
                 } else if (action == "enable_face_detection" && command.contains("enabled")) {
                     bool enabled = command["enabled"];
                     frame_processor_->EnableFaceDetection(enabled);
@@ -237,11 +273,15 @@ void SecurityCamera::IncomingMessage(const std::string& topic, const std::string
                     double sensitivity = command["sensitivity"];
                     frame_processor_->SetMotionSensitivity(sensitivity);
                     INFO_LOG("Motion sensitivity set to " + std::to_string(sensitivity));
-                } else if (action == "set_night_mode_threshold" && command.contains("threshold")) {
-                    int threshold = command["threshold"];
-                    night_mode_threshold_ = threshold;
-                    camera_capture_->SetNightModeThreshold(threshold);
-                    INFO_LOG("Night mode threshold set to " + std::to_string(threshold));
+                } else if (action == "set_night_mode" && command.contains("enabled")) {
+                    night_mode_ = command["enabled"];
+                    camera_capture_->SetNightMode(night_mode_);
+                    INFO_LOG(std::string("Night mode ") + (night_mode_ ? "enabled" : "disabled"));
+                } else {
+                    // Queue other commands too for consistency
+                    std::lock_guard<std::mutex> lock(command_queue_mutex_);
+                    command_queue_.push(command);
+                    command_queue_cv_.notify_one();
                 }
             }
         } catch (const std::exception& e) {
@@ -255,7 +295,6 @@ void SecurityCamera::PublishStatus(const std::string& status) {
     payload["status"] = status;
     payload["timestamp"] = std::time(nullptr);
     payload["night_mode"] = static_cast<bool>(night_mode_);
-    payload["night_mode_threshold"] = night_mode_threshold_;
     
     Publish(STATUS_TOPIC, payload);
 }
@@ -303,17 +342,25 @@ void SecurityCamera::PublishSnapshot(const cv::Mat& frame) {
 }
 
 std::string SecurityCamera::MatToBase64(const cv::Mat& image) {
+    // Compress the image with lower quality for faster processing
+    std::vector<int> compression_params;
+    compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
+    compression_params.push_back(80); // Lower quality for faster processing
+    
     std::vector<uchar> buffer;
-    cv::imencode(".jpg", image, buffer);
+    cv::imencode(".jpg", image, buffer, compression_params);
     
     std::string base64_image = "data:image/jpeg;base64,";
     
-    // Convert to base64
+    // Use a more efficient base64 encoding approach
     static const char base64_chars[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     
-    int i = 0;
-    int j = 0;
+    // Pre-calculate the output size to avoid reallocations
+    size_t output_size = 4 * ((buffer.size() + 2) / 3) + base64_image.size();
+    base64_image.reserve(output_size);
+    
+    size_t i = 0;
     unsigned char char_array_3[3];
     unsigned char char_array_4[4];
     
@@ -333,7 +380,7 @@ std::string SecurityCamera::MatToBase64(const cv::Mat& image) {
     }
     
     if (i) {
-        for (j = i; j < 3; j++) {
+        for (size_t j = i; j < 3; j++) {
             char_array_3[j] = '\0';
         }
         
@@ -341,7 +388,7 @@ std::string SecurityCamera::MatToBase64(const cv::Mat& image) {
         char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
         char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
         
-        for (j = 0; j < i + 1; j++) {
+        for (size_t j = 0; j < i + 1; j++) {
             base64_image += base64_chars[char_array_4[j]];
         }
         

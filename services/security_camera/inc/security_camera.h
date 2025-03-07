@@ -46,6 +46,11 @@ private:
     std::atomic<bool> night_mode_{false};
     int night_mode_threshold_{50};
 
+    // Command queue
+    std::queue<json> command_queue_;
+    std::mutex command_queue_mutex_;
+    std::condition_variable command_queue_cv_;
+
     // Camera components
     std::unique_ptr<CameraCapture> camera_capture_;
     std::unique_ptr<FrameProcessor> frame_processor_;
@@ -71,6 +76,7 @@ private:
     // Processing loops
     void CaptureLoop();
     void ProcessingLoop();
+    void ProcessCommand(const json& command);
 
     // Helper methods
     std::string MatToBase64(const cv::Mat& image);

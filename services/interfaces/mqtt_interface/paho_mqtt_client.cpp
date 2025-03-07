@@ -59,7 +59,15 @@ void PahoMqttClient::Publish(const std::string& topic, const nlohmann::json& pay
         std::string message = payload.dump();
         mqtt::message_ptr pubmsg = mqtt::message::create(topic, message);
         pubmsg->set_qos(1);
-        mqtt_client_.publish(pubmsg)->wait();
+        
+        // Use async publish instead of blocking wait
+        mqtt_client_.publish(pubmsg);
+        
+        // Log large payloads differently to avoid flooding logs
+        if (message.length() > 1000) {
+            DEBUG_LOG("Publishing large message to topic: " + topic + " (size: " + 
+                     std::to_string(message.length()) + " bytes)");
+        }
     } catch (const mqtt::exception& exc) {
         std::string error_msg = "Failed to publish message: " + std::string(exc.what());
         ERROR_LOG(error_msg.c_str());

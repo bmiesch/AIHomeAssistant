@@ -1,0 +1,22 @@
+FROM arm64v8/ubuntu:18.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Add Kitware repository for newer CMake based on distribution
+RUN apt-get update && apt-get install -y wget gpg && \
+    wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null && \
+    echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ bionic main" | tee /etc/apt/sources.list.d/kitware.list >/dev/null && \
+    apt-get update
+
+# Install system dependencies
+RUN apt-get install -y \
+    ccache \
+    g++ \
+    make \
+    git \
+    pkg-config \
+    cmake \
+    libopencv-dev=4.1.1-2-gd5a58aa75 \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build

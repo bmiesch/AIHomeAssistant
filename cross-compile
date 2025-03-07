@@ -8,16 +8,15 @@ BUILD_TYPE=${3:-Release}
 
 # Define supported architectures with their full Docker image identifiers
 # Use a simpler array format for better compatibility
-SUPPORTED_ARCHS="arm64:arm64v8/debian:bookworm"
+SUPPORTED_ARCHS="arm64:arm64v8/debian:bookworm arm64v8-ubuntu18:arm64v8/ubuntu:18.04"
 
 # Define base build dependencies that are always needed
 BASE_DEPS=(
-    "crossbuild-essential-arm64"
+    # "crossbuild-essential-arm64"
     "ccache"
     "g++"
     "make"
     "git"
-    "cmake"
     "pkg-config"
 )
 
@@ -72,14 +71,34 @@ DOCKER_FILE="${ROOT_DIR}/.docker/Dockerfile.${SERVICE_NAME}.${ARCH}"
 cat > "${DOCKER_FILE}" << EOF
 FROM ${DOCKER_IMAGE}
 
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Add Kitware repository for newer CMake based on distribution
+RUN apt-get update && apt-get install -y wget gpg && \\
+    wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null && \\
+EOF
+
+# Add distribution-specific repository
+if [[ "${DOCKER_IMAGE}" == *"debian:bookworm"* ]]; then
+    echo '    echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ bookworm main" | tee /etc/apt/sources.list.d/kitware.list >/dev/null && \' >> "$DOCKER_FILE"
+elif [[ "${DOCKER_IMAGE}" == *"ubuntu:18.04"* ]]; then
+    echo '    echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ bionic main" | tee /etc/apt/sources.list.d/kitware.list >/dev/null && \' >> "$DOCKER_FILE"
+fi
+
+cat >> "${DOCKER_FILE}" << EOF
+    apt-get update
+
 # Install system dependencies
-RUN apt-get update && apt-get install -y \\
+RUN apt-get install -y \\
 EOF
 
 # Add base dependencies to Dockerfile
 for dep in "${BASE_DEPS[@]}"; do
     echo "    $dep \\" >> "$DOCKER_FILE"
 done
+
+# Add cmake separately after other base deps
+echo "    cmake \\" >> "$DOCKER_FILE"
 
 # Add service-specific dependencies to Dockerfile
 grep -v '^#' "$DEPS_FILE" | while read -r dep; do
