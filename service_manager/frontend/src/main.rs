@@ -345,7 +345,7 @@ fn WebSocketComponent() -> impl IntoView {
                                     let topic = &data[topic_start + 7..topic_start + topic_end];
                                     let content = &data[topic_start + topic_end + 3..];
                                     
-                                    if topic == "home/services/security_camera/snapshot" {
+                                    if topic == "home/services/security_camera/snapshot" || topic == "home/services/security_camera/stream" {
                                         return;
                                     }
                                     
@@ -651,6 +651,7 @@ fn ServiceCard(
 fn VideoViewer() -> impl IntoView {
     let (image_data, set_image_data) = create_signal(String::new());
     let (status, set_status) = create_signal(String::from("Waiting for images..."));
+    let (detections, set_detections) = create_signal(Vec::new());
 
     // Action to request a snapshot
     let request_snapshot = create_action(move |_| async move {
@@ -681,14 +682,34 @@ fn VideoViewer() -> impl IntoView {
                                 let topic = &data[topic_start + 7..topic_start + topic_end];
                                 let content = &data[topic_start + topic_end + 3..];
                                 
-                                // Check if this is a snapshot message
-                                if topic == "home/services/security_camera/snapshot" {
-                                    if let Ok(_json) = serde_json::from_str::<serde_json::Value>(content) {
-                                        if let Some(image) = _json.get("image").and_then(|i| i.as_str()) {
-                                            set_image_data.set(image.to_string());
-                                            set_status.set("Image received".to_string());
+                                match topic {
+                                    // Handle snapshot images
+                                    "home/services/security_camera/snapshot" => {
+                                        if let Ok(_json) = serde_json::from_str::<serde_json::Value>(content) {
+                                            if let Some(image) = _json.get("image").and_then(|i| i.as_str()) {
+                                                set_image_data.set(image.to_string());
+                                                set_status.set("Image received".to_string());
+                                            }
                                         }
-                                    }
+                                    },
+                                    // Handle detections
+                                    "home/services/security_camera/detections" => {
+                                        if let Ok(_json) = serde_json::from_str::<serde_json::Value>(content) {
+                                            if let Some(dets) = _json.get("detections").and_then(|d| d.as_array()) {
+                                                let mut new_detections = Vec::new();
+                                                for det in dets {
+                                                    if let (Some(class), Some(confidence)) = (
+                                                        det.get("class").and_then(|c| c.as_str()),
+                                                        det.get("confidence").and_then(|c| c.as_f64())
+                                                    ) {
+                                                        new_detections.push((class.to_string(), confidence));
+                                                    }
+                                                }
+                                                set_detections.set(new_detections);
+                                            }
+                                        }
+                                    },
+                                    _ => {}
                                 }
                             }
                         }
@@ -707,34 +728,59 @@ fn VideoViewer() -> impl IntoView {
     view! {
         <div class="bg-white rounded-lg shadow p-4">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-lg font-semibold">"Security Camera Feed"</h2>
+                <h2 class="text-xl font-semibold">"Security Camera Feed"</h2>
                 <button
-                    class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                    class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 font-medium"
                     on:click=move |_| request_snapshot.dispatch(())
                 >
                     "Take Snapshot"
                 </button>
             </div>
-            <div class="relative aspect-video bg-gray-100 rounded overflow-hidden">
-                {move || {
-                    if image_data.get().is_empty() {
-                        view! {
-                            <div class="absolute inset-0 flex items-center justify-center">
-                                <span class="text-gray-500">{move || status.get()}</span>
-                            </div>
+            <div class="space-y-4">
+                <div class="relative rounded overflow-hidden" style="min-height: 400px;">
+                    {move || {
+                        if image_data.get().is_empty() {
+                            view! {
+                                <div class="absolute inset-0 flex items-center justify-center bg-gray-100">
+                                    <span class="text-gray-500 text-lg">{move || status.get()}</span>
+                                </div>
+                            }
+                        } else {
+                            view! {
+                                <div class="absolute inset-0 bg-black">
+                                    <img 
+                                        src={image_data.get()} 
+                                        class="w-full h-full object-contain"
+                                        alt="Security Camera Feed"
+                                    />
+                                </div>
+                            }
                         }
-                    } else {
-                        view! {
-                            <div class="absolute inset-0">
-                                <img 
-                                    src={image_data.get()} 
-                                    class="w-full h-full object-contain"
-                                    alt="Security Camera Feed"
-                                />
-                            </div>
-                        }
-                    }
-                }}
+                    }}
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-2">"Detections"</h3>
+                    <div class="grid grid-cols-2 gap-2 max-h-[150px] overflow-y-auto">
+                        {move || {
+                            if detections.get().is_empty() {
+                                vec![view! {
+                                    <div class="text-gray-500 text-sm col-span-2">"No detections"</div>
+                                }].into_iter().collect::<Vec<_>>()
+                            } else {
+                                detections.get().into_iter().map(|(class, confidence)| {
+                                    view! {
+                                        <div class="bg-gray-50 p-2 rounded-lg shadow-sm">
+                                            <div class="font-medium text-base">{class}</div>
+                                            <div class="text-sm text-gray-600">
+                                                {"Confidence: "}{format!("{:.1}%", confidence * 100.0)}
+                                            </div>
+                                        </div>
+                                    }
+                                }).collect::<Vec<_>>()
+                            }
+                        }}
+                    </div>
+                </div>
             </div>
         </div>
     }
@@ -805,10 +851,10 @@ fn App() -> impl IntoView {
 
             <div class="w-1/3 p-4">
                 <VideoViewer />
-                <WebSocketComponent />
             </div>
 
             <div class="w-1/3 p-4">
+                <WebSocketComponent />
                 <div class="mt-4">
                     <MqttPublisher />
                 </div>
