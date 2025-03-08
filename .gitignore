@@ -9,6 +9,7 @@ dump/
 **.env
 !example.env
 **/lib/*
+**/models/*
 !**/lib/.gitkeep
 notes.md
 roadmap.md

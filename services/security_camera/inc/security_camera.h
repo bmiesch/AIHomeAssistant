@@ -37,14 +37,11 @@ private:
     // Constants
     static constexpr const char* STATUS_TOPIC = "home/services/security_camera/status";
     static constexpr const char* COMMAND_TOPIC = "home/services/security_camera/command";
-    static constexpr const char* MOTION_TOPIC = "home/services/security_camera/motion";
-    static constexpr const char* FACE_DETECTION_TOPIC = "home/services/security_camera/face_detection";
+    static constexpr const char* DETECTIONS_TOPIC = "home/services/security_camera/detections";
     static constexpr const char* SNAPSHOT_TOPIC = "home/services/security_camera/snapshot";
 
     // State
     std::atomic<bool> running_{true};
-    std::atomic<bool> night_mode_{false};
-    int night_mode_threshold_{50};
 
     // Command queue
     std::queue<json> command_queue_;
@@ -69,8 +66,6 @@ private:
     // MQTT handling
     void IncomingMessage(const std::string& topic, const std::string& payload);
     void PublishStatus(const std::string& status);
-    void PublishMotionDetection(bool motion_detected, const json& details = json::object());
-    void PublishFaceDetection(int face_count, const json& details = json::object());
     void PublishSnapshot(const cv::Mat& frame);
 
     // Processing loops

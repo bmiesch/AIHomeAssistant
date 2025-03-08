@@ -12,17 +12,7 @@
 SecurityCamera::SecurityCamera(const std::string& broker_address, const std::string& client_id, 
                              const std::string& ca_path, const std::string& username, 
                              const std::string& password)
-    : PahoMqttClient(broker_address, client_id, ca_path, username, password),
-      camera_capture_(std::make_unique<CameraCapture>()),
-      frame_processor_(std::make_unique<FrameProcessor>()) {
-    
-    // Set up MQTT message callback
-    SetMessageCallback([this](mqtt::const_message_ptr msg) {
-        this->IncomingMessage(msg->get_topic(), msg->to_string());
-    });
-
-    // Subscribe to command topic
-    Subscribe(COMMAND_TOPIC);
+    : PahoMqttClient(broker_address, client_id, ca_path, username, password) {
     
     // Get environment variables
     int camera_id = 0;
@@ -37,15 +27,15 @@ SecurityCamera::SecurityCamera(const std::string& broker_address, const std::str
     
     // Initialize camera with settings
     camera_capture_ = std::make_unique<CameraCapture>(camera_id, width, height, fps);
-    
-    // Set up callbacks
-    frame_processor_->SetMotionCallback([this](bool motion_detected, const json& details) {
-        this->PublishMotionDetection(motion_detected, details);
+    frame_processor_ = std::make_unique<FrameProcessor>();
+
+    // Set up MQTT message callback
+    SetMessageCallback([this](mqtt::const_message_ptr msg) {
+        this->IncomingMessage(msg->get_topic(), msg->to_string());
     });
-    
-    frame_processor_->SetFaceDetectionCallback([this](int face_count, const json& details) {
-        this->PublishFaceDetection(face_count, details);
-    });
+
+    // Subscribe to command topic
+    Subscribe(COMMAND_TOPIC);
 }
 
 SecurityCamera::~SecurityCamera() {
@@ -56,22 +46,32 @@ SecurityCamera::~SecurityCamera() {
 void SecurityCamera::Initialize() {
     INFO_LOG("Initializing Security Camera Service");
     
-    // Initialize camera
-    if (!camera_capture_->Initialize()) {
-        throw std::runtime_error("Failed to initialize camera");
+    try {
+        // Initialize camera first
+        if (!camera_capture_->Initialize()) {
+            ERROR_LOG("Failed to initialize camera");
+            throw std::runtime_error("Failed to initialize camera");
+        }
+        INFO_LOG("Camera initialized successfully");
+        
+        // Initialize frame processor
+        if (!frame_processor_->Initialize()) {
+            ERROR_LOG("Failed to initialize frame processor");
+            throw std::runtime_error("Failed to initialize frame processor");
+        }
+        INFO_LOG("Frame processor initialized successfully");
+        
+        // Only start threads after successful initialization
+        capture_thread_ = std::thread(&SecurityCamera::CaptureLoop, this);
+        processing_thread_ = std::thread(&SecurityCamera::ProcessingLoop, this);
+        worker_thread_ = std::thread(&SecurityCamera::Run, this);
+        
+        INFO_LOG("Security Camera Service initialized successfully");
+    } catch (const std::exception& e) {
+        ERROR_LOG("Initialization failed: " + std::string(e.what()));
+        Stop();  // Clean up any partially initialized resources
+        throw;  // Re-throw the exception to notify the caller
     }
-    
-    // Initialize frame processor
-    if (!frame_processor_->Initialize()) {
-        throw std::runtime_error("Failed to initialize frame processor");
-    }
-    
-    // Start threads
-    capture_thread_ = std::thread(&SecurityCamera::CaptureLoop, this);
-    processing_thread_ = std::thread(&SecurityCamera::ProcessingLoop, this);
-    worker_thread_ = std::thread(&SecurityCamera::Run, this);
-    
-    INFO_LOG("Security Camera Service initialized");
 }
 
 void SecurityCamera::Stop() {
@@ -82,19 +82,33 @@ void SecurityCamera::Stop() {
     // Set running flag to false to stop threads
     running_ = false;
     
-    // Notify processing thread to wake up
+    // Notify all waiting threads
     frame_queue_cv_.notify_all();
+    command_queue_cv_.notify_all();
     
     // Wait for threads to finish
-    if (capture_thread_.joinable()) capture_thread_.join();
-    if (processing_thread_.joinable()) processing_thread_.join();
-    if (worker_thread_.joinable()) worker_thread_.join();
+    if (capture_thread_.joinable()) {
+        capture_thread_.join();
+        DEBUG_LOG("Capture thread joined");
+    }
+    if (processing_thread_.joinable()) {
+        processing_thread_.join();
+        DEBUG_LOG("Processing thread joined");
+    }
+    if (worker_thread_.joinable()) {
+        worker_thread_.join();
+        DEBUG_LOG("Worker thread joined");
+    }
     
-    // Publish offline status
-    PublishStatus("offline");
-    
-    // Disconnect from MQTT broker
-    Disconnect();
+    try {
+        // Publish offline status
+        PublishStatus("offline");
+        
+        // Disconnect from MQTT broker
+        Disconnect();
+    } catch (const std::exception& e) {
+        ERROR_LOG("Error during shutdown: " + std::string(e.what()));
+    }
     
     INFO_LOG("Security Camera Service stopped");
 }
@@ -143,23 +157,31 @@ void SecurityCamera::Run() {
 
 void SecurityCamera::ProcessCommand(const json& command) {
     try {
-        if (command.contains("action")) {
-            std::string action = command["action"];
-            
-            if (action == "snapshot") {
-                INFO_LOG("Processing snapshot request");
-                // Capture and publish a snapshot
-                cv::Mat frame = camera_capture_->CaptureFrame();
-                if (!frame.empty()) {
-                    PublishSnapshot(frame);
-                    INFO_LOG("Snapshot published successfully");
-                }
-                else {
-                    ERROR_LOG("Failed to capture snapshot");
+        if (!command.contains("action")) {
+            ERROR_LOG("Missing 'action' field in command");
+            return;
+        }
+
+        std::string action = command["action"];
+        DEBUG_LOG("Processing action: " + action);
+        
+        if (action == "snapshot") {
+            cv::Mat frame;
+            {
+                std::lock_guard<std::mutex> lock(frame_queue_mutex_);
+                if (!frame_queue_.empty()) {
+                    frame = frame_queue_.front();
                 }
             }
-            // Other commands are handled directly in IncomingMessage
+            
+            if (!frame.empty()) {
+                PublishSnapshot(frame);
+            }
         }
+        else {
+            ERROR_LOG("Unknown command: " + action);
+        }
+        
     } catch (const std::exception& e) {
         ERROR_LOG("Error processing command: " + std::string(e.what()));
     }
@@ -187,7 +209,6 @@ void SecurityCamera::CaptureLoop() {
                 // Limit queue size
                 if (frame_queue_.size() > 10) {
                     frame_queue_.pop();
-                    WARN_LOG("Frame queue overflow, dropping oldest frame");
                 }
             }
             
@@ -208,8 +229,6 @@ void SecurityCamera::ProcessingLoop() {
     
     while (running_) {
         cv::Mat frame;
-        
-        // Get frame from queue
         {
             std::unique_lock<std::mutex> lock(frame_queue_mutex_);
             frame_queue_cv_.wait(lock, [this] { 
@@ -222,21 +241,43 @@ void SecurityCamera::ProcessingLoop() {
             frame_queue_.pop();
         }
         
-        try {
-            // Process frame
-            auto result = frame_processor_->ProcessFrame(frame, night_mode_);
+        if (!frame.empty()) {
+            // Process frame and get detections
+            auto result = frame_processor_->ProcessFrame(frame);
             
-            // Periodically publish a snapshot (every 100 frames with motion or faces)
-            static int frame_count = 0;
-            frame_count++;
+            // Publish detections
+            json details;
+            details["fps"] = result.fps;
+            details["latency_ms"] = result.latency_ms;
             
-            if ((result.motion_detected || result.face_count > 0) && frame_count >= 100) {
-                PublishSnapshot(frame);
-                frame_count = 0;
+            // Group detections by type
+            int person_count = 0;
+            int vehicle_count = 0;
+            int animal_count = 0;
+            
+            for (const auto& det : result.detections) {
+                if (det.class_name == "person") {
+                    person_count++;
+                } else if (det.class_name == "car" || det.class_name == "truck" || 
+                         det.class_name == "bus" || det.class_name == "motorcycle") {
+                    vehicle_count++;
+                } else if (det.class_name == "dog" || det.class_name == "cat" || det.class_name == "bird") {
+                    animal_count++;
+                }
             }
             
-        } catch (const std::exception& e) {
-            ERROR_LOG("Error in processing loop: " + std::string(e.what()));
+            // Publish detection results
+            if (!result.detections.empty()) {
+                json detection_details = result.ToJson();
+                detection_details["person_count"] = person_count;
+                detection_details["vehicle_count"] = vehicle_count;
+                detection_details["animal_count"] = animal_count;
+                
+                Publish(DETECTIONS_TOPIC, detection_details);
+                
+                // Also publish snapshot if something was detected
+                PublishSnapshot(frame);
+            }
         }
     }
     
@@ -244,49 +285,16 @@ void SecurityCamera::ProcessingLoop() {
 }
 
 void SecurityCamera::IncomingMessage(const std::string& topic, const std::string& payload) {
-    DEBUG_LOG("Received message on topic: " + topic + ", payload: " + payload);
-    
-    if (topic == COMMAND_TOPIC) {
-        try {
-            json command = json::parse(payload);
-            
-            if (command.contains("action")) {
-                std::string action = command["action"];
-                
-                if (action == "snapshot") {
-                    INFO_LOG("Snapshot requested - queuing task");
-                    
-                    // Queue the snapshot task to be processed by the worker thread
-                    // instead of processing it directly in the MQTT callback thread
-                    std::lock_guard<std::mutex> lock(command_queue_mutex_);
-                    command_queue_.push(command);
-                    command_queue_cv_.notify_one();
-                } else if (action == "enable_face_detection" && command.contains("enabled")) {
-                    bool enabled = command["enabled"];
-                    frame_processor_->EnableFaceDetection(enabled);
-                    INFO_LOG(std::string("Face detection ") + (enabled ? "enabled" : "disabled"));
-                } else if (action == "enable_motion_detection" && command.contains("enabled")) {
-                    bool enabled = command["enabled"];
-                    frame_processor_->EnableMotionDetection(enabled);
-                    INFO_LOG(std::string("Motion detection ") + (enabled ? "enabled" : "disabled"));
-                } else if (action == "set_motion_sensitivity" && command.contains("sensitivity")) {
-                    double sensitivity = command["sensitivity"];
-                    frame_processor_->SetMotionSensitivity(sensitivity);
-                    INFO_LOG("Motion sensitivity set to " + std::to_string(sensitivity));
-                } else if (action == "set_night_mode" && command.contains("enabled")) {
-                    night_mode_ = command["enabled"];
-                    camera_capture_->SetNightMode(night_mode_);
-                    INFO_LOG(std::string("Night mode ") + (night_mode_ ? "enabled" : "disabled"));
-                } else {
-                    // Queue other commands too for consistency
-                    std::lock_guard<std::mutex> lock(command_queue_mutex_);
-                    command_queue_.push(command);
-                    command_queue_cv_.notify_one();
-                }
-            }
-        } catch (const std::exception& e) {
-            ERROR_LOG("Error processing command: " + std::string(e.what()));
+    try {
+        json command = json::parse(payload);
+        
+        if (topic == COMMAND_TOPIC) {
+            std::lock_guard<std::mutex> lock(command_queue_mutex_);
+            command_queue_.push(command);
+            command_queue_cv_.notify_one();
         }
+    } catch (const std::exception& e) {
+        ERROR_LOG("Error processing command: " + std::string(e.what()));
     }
 }
 
@@ -294,37 +302,8 @@ void SecurityCamera::PublishStatus(const std::string& status) {
     json payload;
     payload["status"] = status;
     payload["timestamp"] = std::time(nullptr);
-    payload["night_mode"] = static_cast<bool>(night_mode_);
     
     Publish(STATUS_TOPIC, payload);
-}
-
-void SecurityCamera::PublishMotionDetection(bool motion_detected, const json& details) {
-    json payload;
-    payload["motion_detected"] = motion_detected;
-    payload["timestamp"] = std::time(nullptr);
-    payload["night_mode"] = static_cast<bool>(night_mode_);
-    
-    // Add any additional details
-    for (auto& [key, value] : details.items()) {
-        payload[key] = value;
-    }
-    
-    Publish(MOTION_TOPIC, payload);
-}
-
-void SecurityCamera::PublishFaceDetection(int face_count, const json& details) {
-    json payload;
-    payload["face_count"] = face_count;
-    payload["timestamp"] = std::time(nullptr);
-    payload["night_mode"] = static_cast<bool>(night_mode_);
-    
-    // Add any additional details
-    for (auto& [key, value] : details.items()) {
-        payload[key] = value;
-    }
-    
-    Publish(FACE_DETECTION_TOPIC, payload);
 }
 
 void SecurityCamera::PublishSnapshot(const cv::Mat& frame) {
@@ -334,7 +313,7 @@ void SecurityCamera::PublishSnapshot(const cv::Mat& frame) {
     json payload;
     payload["image"] = base64_image;
     payload["timestamp"] = std::time(nullptr);
-    payload["night_mode"] = static_cast<bool>(night_mode_);
+
     payload["width"] = frame.cols;
     payload["height"] = frame.rows;
     

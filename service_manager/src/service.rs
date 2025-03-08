@@ -238,6 +238,35 @@ impl ServiceManager {
             }
         }
 
+        // Copy over the models
+        let local_models_dir = ROOT_DIR.join("services").join(&service.name).join("models");
+        let remote_models_dir = format!("/usr/local/lib/{}", service.name);
+        service.device.execute_command(&format!("sudo rm -rf {}", remote_models_dir))?;
+        service.device.execute_command(&format!("sudo mkdir -p {}", remote_models_dir))?;
+        service.device.execute_command(&format!("sudo chown {} {}", service.device.config.username, remote_models_dir))?;
+
+        if local_models_dir.exists() {
+            let status = Command::new("sshpass")
+                .args([
+                    "-p", &service.device.config.password,
+                    "scp",
+                    "-r",
+                    &format!("{}/.", local_models_dir.to_str().unwrap()),
+                    &format!("{}@{}:{}",
+                        service.device.config.username,
+                        service.device.config.ip_address,
+                        remote_models_dir
+                    )
+                ])
+                .status()?;
+
+            if !status.success() {
+                return Err(ServiceManagerError::DeploymentError(
+                    "Failed to copy models".to_string()
+                ));
+            }
+        }
+
         // First disable and unmask the service if it exists
         info!("Cleaning up existing service state");
         service.device.execute_command(&format!(

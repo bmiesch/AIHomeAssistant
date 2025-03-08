@@ -1,216 +1,142 @@
 #include "frame_processor.h"
 #include "log.h"
 #include <chrono>
-#include <opencv2/imgproc.hpp>
+#include <fstream>
 
 json DetectionResult::ToJson() const {
     json result;
-    result["motion_detected"] = motion_detected;
-    result["face_count"] = face_count;
+    json detections_array = json::array();
+    
+    for (const auto& det : detections) {
+        json detection;
+        detection["class"] = det.class_name;
+        detection["confidence"] = det.confidence;
+        detection["box"] = {
+            {"x", det.box.x},
+            {"y", det.box.y},
+            {"width", det.box.width},
+            {"height", det.box.height}
+        };
+        detections_array.push_back(detection);
+    }
+    
+    result["detections"] = detections_array;
     result["fps"] = fps;
     result["latency_ms"] = latency_ms;
-    result["night_mode"] = night_mode;
-    
-    // Add face locations
-    json face_locs = json::array();
-    for (const auto& rect : face_locations) {
-        json face_rect;
-        face_rect["x"] = rect.x;
-        face_rect["y"] = rect.y;
-        face_rect["width"] = rect.width;
-        face_rect["height"] = rect.height;
-        face_locs.push_back(face_rect);
-    }
-    result["face_locations"] = face_locs;
     
     return result;
 }
 
-FrameProcessor::FrameProcessor()
-    : last_fps_time_(std::chrono::steady_clock::now()) {
+FrameProcessor::FrameProcessor() {
+    // Initialize class names we care about
+    class_names_ = {"person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+                   "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"};
 }
 
-FrameProcessor::~FrameProcessor() {
-}
+FrameProcessor::~FrameProcessor() = default;
 
 bool FrameProcessor::Initialize() {
-    INFO_LOG("Initializing frame processor");
-    
-    // Load face cascade classifier
-    std::string cascade_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
-    if (!face_cascade_.load(cascade_path)) {
-        ERROR_LOG("Error loading face cascade classifier");
-        // Continue without face detection
-        face_detection_enabled_ = false;
-        return true; // Still return true as this is not critical
+    try {
+        // Load YOLO network
+        net_ = cv::dnn::readNetFromDarknet(
+            "/usr/local/lib/security_camera/yolov3.cfg",
+            "/usr/local/lib/security_camera/yolov3.weights"
+        );
+
+        net_.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+        net_.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+        INFO_LOG("Using CPU backend for inference");
+
+        INFO_LOG("Frame processor initialized successfully");
+        return true;
+    } catch (const cv::Exception& e) {
+        ERROR_LOG("OpenCV error during initialization: " + std::string(e.what()));
+        return false;
+    } catch (const std::exception& e) {
+        ERROR_LOG("Error during initialization: " + std::string(e.what()));
+        return false;
     }
-    
-    INFO_LOG("Frame processor initialized successfully");
-    return true;
 }
 
-DetectionResult FrameProcessor::ProcessFrame(cv::Mat& frame, bool night_mode) {
-    auto start_time = std::chrono::steady_clock::now();
+DetectionResult FrameProcessor::ProcessFrame(cv::Mat& frame) {
+    auto start = std::chrono::steady_clock::now();
+    
     DetectionResult result;
-    result.night_mode = night_mode;
+    result.detections = Detect(frame);
+    DrawDetections(frame, result.detections);
     
-    if (frame.empty()) {
-        return result;
+    auto end = std::chrono::steady_clock::now();
+    result.latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    
+    // Calculate FPS
+    static auto last_time = start;
+    static int frame_count = 0;
+    frame_count++;
+    
+    auto time_diff = std::chrono::duration_cast<std::chrono::milliseconds>(end - last_time).count();
+    if (time_diff >= 1000) {  // Update FPS every second
+        result.fps = frame_count * 1000.0 / time_diff;
+        frame_count = 0;
+        last_time = end;
     }
-    
-    // Update FPS
-    UpdateFPS();
-    result.fps = fps_;
-    
-    // Detect faces if enabled
-    if (face_detection_enabled_) {
-        result.face_locations = DetectFaces(frame);
-        result.face_count = result.face_locations.size();
-        
-        // Call face detection callback if faces detected and callback is set
-        if (result.face_count > 0 && face_detection_callback_) {
-            face_detection_callback_(result.face_count, result.ToJson());
-        }
-    }
-    
-    // Detect motion if enabled
-    if (motion_detection_enabled_) {
-        result.motion_detected = DetectMotion(frame);
-        
-        // Call motion callback if motion detected and callback is set
-        if (result.motion_detected && motion_callback_) {
-            motion_callback_(true, result.ToJson());
-        }
-    }
-    
-    // Calculate latency
-    auto end_time = std::chrono::steady_clock::now();
-    result.latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    
-    // Draw information on frame
-    DrawInfo(frame, result);
     
     return result;
 }
 
-void FrameProcessor::SetMotionCallback(MotionCallback callback) {
-    motion_callback_ = callback;
-}
-
-void FrameProcessor::SetFaceDetectionCallback(FaceDetectionCallback callback) {
-    face_detection_callback_ = callback;
-}
-
-void FrameProcessor::EnableFaceDetection(bool enable) {
-    face_detection_enabled_ = enable;
-}
-
-void FrameProcessor::EnableMotionDetection(bool enable) {
-    motion_detection_enabled_ = enable;
-}
-
-void FrameProcessor::SetMotionSensitivity(double sensitivity) {
-    motion_sensitivity_ = sensitivity;
-}
-
-std::vector<cv::Rect> FrameProcessor::DetectFaces(const cv::Mat& frame) {
-    std::vector<cv::Rect> faces;
+std::vector<Detection> FrameProcessor::Detect(const cv::Mat& frame) {
+    std::vector<Detection> detections;
     
-    // Convert to grayscale for face detection
-    cv::Mat gray;
-    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+    // Create blob from image
+    cv::Mat blob = cv::dnn::blobFromImage(frame, 1/255.0, cv::Size(416, 416), cv::Scalar(), true, false);
+    net_.setInput(blob);
     
-    // Detect faces
-    face_cascade_.detectMultiScale(gray, faces, 1.1, 4, 0, cv::Size(30, 30));
+    // Get output layer names
+    std::vector<cv::String> outLayerNames = net_.getUnconnectedOutLayersNames();
+    std::vector<cv::Mat> outs;
+    net_.forward(outs, outLayerNames);
     
-    return faces;
-}
-
-bool FrameProcessor::DetectMotion(const cv::Mat& current_frame) {
-    // If this is the first frame, initialize and return false
-    if (prev_frame_.empty()) {
-        cv::cvtColor(current_frame, prev_frame_, cv::COLOR_BGR2GRAY);
-        return false;
+    // Process detections
+    for (const auto& out : outs) {
+        for (int i = 0; i < out.rows; ++i) {
+            cv::Mat scores = out.row(i).colRange(5, out.cols);
+            cv::Point classIdPoint;
+            double confidence;
+            cv::minMaxLoc(scores, nullptr, &confidence, nullptr, &classIdPoint);
+            
+            if (confidence > conf_threshold_) {
+                int class_id = classIdPoint.x;
+                std::string class_name = class_names_[class_id];
+                
+                // Only keep people, vehicles, and animals
+                if (class_name == "person" || 
+                    class_name == "car" || class_name == "truck" || class_name == "bus" || class_name == "motorcycle" ||
+                    class_name == "dog" || class_name == "cat" || class_name == "bird") {
+                    
+                    Detection det;
+                    det.class_name = class_name;
+                    det.confidence = static_cast<float>(confidence);
+                    
+                    // Get bounding box
+                    int centerX = static_cast<int>(out.at<float>(i, 0) * frame.cols);
+                    int centerY = static_cast<int>(out.at<float>(i, 1) * frame.rows);
+                    int width = static_cast<int>(out.at<float>(i, 2) * frame.cols);
+                    int height = static_cast<int>(out.at<float>(i, 3) * frame.rows);
+                    det.box = cv::Rect(centerX - width/2, centerY - height/2, width, height);
+                    
+                    detections.push_back(det);
+                }
+            }
+        }
     }
     
-    // Convert current frame to grayscale
-    cv::Mat gray;
-    cv::cvtColor(current_frame, gray, cv::COLOR_BGR2GRAY);
-    
-    // Calculate absolute difference between current and previous frame
-    cv::Mat diff;
-    cv::absdiff(prev_frame_, gray, diff);
-    
-    // Apply threshold to difference
-    cv::Mat thresh;
-    cv::threshold(diff, thresh, 25, 255, cv::THRESH_BINARY);
-    
-    // Dilate to fill in holes
-    cv::dilate(thresh, thresh, cv::Mat(), cv::Point(-1, -1), 2);
-    
-    // Find contours
-    std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-    
-    // Calculate total area of motion
-    double total_area = 0;
-    for (const auto& contour : contours) {
-        total_area += cv::contourArea(contour);
-    }
-    
-    // Calculate percentage of frame with motion
-    double frame_area = current_frame.cols * current_frame.rows;
-    double motion_percentage = (total_area / frame_area) * 100.0;
-    
-    // Update previous frame
-    gray.copyTo(prev_frame_);
-    
-    // Detect motion based on sensitivity
-    return motion_percentage > motion_sensitivity_;
+    return detections;
 }
 
-void FrameProcessor::UpdateFPS() {
-    frame_count_++;
-    
-    auto now = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_fps_time_).count();
-    
-    if (duration >= 1000) {
-        fps_ = frame_count_ * 1000.0 / duration;
-        frame_count_ = 0;
-        last_fps_time_ = now;
-    }
-}
-
-void FrameProcessor::DrawInfo(cv::Mat& frame, const DetectionResult& result) {
-    // Draw rectangles around faces
-    for (const auto& face : result.face_locations) {
-        cv::rectangle(frame, face, cv::Scalar(0, 255, 0), 2);
-    }
-    
-    // Draw FPS
-    cv::putText(frame, "FPS: " + std::to_string(static_cast<int>(result.fps)), 
-                cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0), 2);
-    
-    // Draw latency
-    cv::putText(frame, "Latency: " + std::to_string(static_cast<int>(result.latency_ms)) + " ms", 
-                cv::Point(10, 70), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0), 2);
-    
-    // Draw night mode indicator
-    if (result.night_mode) {
-        cv::putText(frame, "NIGHT MODE", cv::Point(10, 110), 
-                    cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 165, 255), 2);
-    }
-    
-    // Draw motion detection indicator
-    if (result.motion_detected) {
-        cv::putText(frame, "MOTION DETECTED", cv::Point(10, frame.rows - 10), 
-                    cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 2);
-    }
-    
-    // Draw face count
-    if (result.face_count > 0) {
-        cv::putText(frame, "Faces: " + std::to_string(result.face_count), 
-                    cv::Point(frame.cols - 200, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0), 2);
+void FrameProcessor::DrawDetections(cv::Mat& frame, const std::vector<Detection>& detections) {
+    for (const auto& det : detections) {
+        cv::rectangle(frame, det.box, cv::Scalar(0, 255, 0), 2);
+        std::string label = det.class_name + " " + std::to_string(static_cast<int>(det.confidence * 100)) + "%";
+        cv::putText(frame, label, cv::Point(det.box.x, det.box.y - 5),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 2);
     }
 } 

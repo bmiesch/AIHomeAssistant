@@ -21,7 +21,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Add build type configuration
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build" FORCE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build" FORCE)
 endif()
 set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
 
@@ -30,11 +30,44 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic")
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
-find_package(OpenCV 4.1.1 REQUIRED)
 find_package(OpenSSL REQUIRED)
 
 # Set up external dependencies installation prefix
 set(EXTERNAL_INSTALL_LOCATION ${CMAKE_BINARY_DIR}/external)
+
+# OpenCV
+ExternalProject_Add(opencv_build
+    GIT_REPOSITORY https://github.com/opencv/opencv.git
+    GIT_TAG 4.1.1
+    GIT_SHALLOW ON
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${EXTERNAL_INSTALL_LOCATION}
+        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        -DCMAKE_CXX_STANDARD=17
+        -DCMAKE_SYSTEM_NAME=Linux
+        -DCMAKE_SYSTEM_PROCESSOR=aarch64
+        -DCPU_BASELINE=NEON
+        -DENABLE_NEON=ON
+        -DENABLE_VFPV3=OFF
+        -DBUILD_TESTS=OFF
+        -DBUILD_PERF_TESTS=OFF
+        -DBUILD_EXAMPLES=OFF
+        -DBUILD_JAVA=OFF
+        -DBUILD_opencv_python2=OFF
+        -DBUILD_opencv_python3=OFF
+        -DWITH_CUDA=OFF
+        -DWITH_OPENCL=OFF
+        -DWITH_EIGEN=ON
+        -DWITH_OPENMP=ON
+        -DWITH_IPP=OFF
+        -DWITH_TBB=OFF
+        -DWITH_FFMPEG=OFF
+        -DBUILD_LIST=core,imgproc,imgcodecs,videoio,highgui,video,features2d,dnn
+    BUILD_COMMAND
+        ${CMAKE_COMMAND} --build <BINARY_DIR>
+    INSTALL_COMMAND
+        ${CMAKE_COMMAND} --build <BINARY_DIR> --target install
+)
 
 # nlohmann-json
 ExternalProject_Add(json
@@ -71,9 +104,6 @@ ExternalProject_Add(paho-mqtt-cpp
         ${CMAKE_COMMAND} --build <BINARY_DIR> --target install
 )
 
-# Add the external install location to the CMAKE_PREFIX_PATH
-list(APPEND CMAKE_PREFIX_PATH ${EXTERNAL_INSTALL_LOCATION})
-
 # Collect source files
 file(GLOB SOURCES
     src/*.cpp
@@ -87,6 +117,7 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 
 # Add dependencies on external projects
 add_dependencies(${PROJECT_NAME}
+    opencv_build
     paho-mqtt-cpp
     json
 )
@@ -100,7 +131,7 @@ target_include_directories(${PROJECT_NAME}
         ${INTERFACES_DIR}/service_interface
         ${INTERFACES_DIR}/mqtt_interface
         ${EXTERNAL_INSTALL_LOCATION}/include
-        ${OpenCV_INCLUDE_DIRS}
+        ${EXTERNAL_INSTALL_LOCATION}/include/opencv4
 )
 
 # Link libraries
@@ -111,7 +142,14 @@ target_link_directories(${PROJECT_NAME}
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
-        ${OpenCV_LIBS}
+        opencv_core
+        opencv_imgproc
+        opencv_imgcodecs
+        opencv_videoio
+        opencv_highgui
+        opencv_video
+        opencv_features2d
+        opencv_dnn
         paho-mqtt3as
         paho-mqttpp3
         OpenSSL::SSL
@@ -124,8 +162,14 @@ install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
 
-# # Install Paho libraries
-# install(DIRECTORY ${EXTERNAL_INSTALL_LOCATION}/lib/ 
-#     DESTINATION lib/${PROJECT_NAME}
-#     FILES_MATCHING PATTERN "libpaho*"
-# )
+# Install OpenCV libraries
+install(DIRECTORY ${EXTERNAL_INSTALL_LOCATION}/lib/
+    DESTINATION lib/${PROJECT_NAME}
+    FILES_MATCHING PATTERN "libopencv_*"
+)
+
+# Install Paho libraries
+install(DIRECTORY ${EXTERNAL_INSTALL_LOCATION}/lib/
+    DESTINATION lib/${PROJECT_NAME}
+    FILES_MATCHING PATTERN "libpaho*"
+)
