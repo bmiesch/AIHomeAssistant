@@ -15,6 +15,7 @@ notes.md
 roadmap.md
 ideas.md
 **/targets/
+**/certs/
 
 # Build artifacts
 **/target/

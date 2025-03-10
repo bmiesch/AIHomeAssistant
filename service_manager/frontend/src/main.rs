@@ -345,7 +345,10 @@ fn WebSocketComponent() -> impl IntoView {
                                     let topic = &data[topic_start + 7..topic_start + topic_end];
                                     let content = &data[topic_start + topic_end + 3..];
                                     
-                                    if topic == "home/services/security_camera/snapshot" || topic == "home/services/security_camera/stream" {
+                                    // Skip snapshot and stream messages in the general log
+                                    // but still allow them to be processed by the VideoViewer component
+                                    if topic == "home/services/security_camera/snapshot" || 
+                                       topic == "home/services/security_camera/token" {
                                         return;
                                     }
                                     
@@ -652,6 +655,9 @@ fn VideoViewer() -> impl IntoView {
     let (image_data, set_image_data) = create_signal(String::new());
     let (status, set_status) = create_signal(String::from("Waiting for images..."));
     let (detections, set_detections) = create_signal(Vec::new());
+    let (streaming, set_streaming) = create_signal(false);
+    let (stream_url, set_stream_url) = create_signal(String::new());
+    let (stream_token, set_stream_token) = create_signal(String::new());
 
     // Action to request a snapshot
     let request_snapshot = create_action(move |_| async move {
@@ -666,6 +672,66 @@ fn VideoViewer() -> impl IntoView {
             &payload.to_string()
         ).await {
             Ok(_) => set_status.set("Snapshot requested".to_string()),
+            Err(e) => set_status.set(format!("Error: {}", e))
+        }
+    });
+
+    // Action to request a stream token
+    let request_token = create_action(move |_| async move {
+        set_status.set("Requesting stream token...".to_string());
+        
+        let payload = serde_json::json!({
+            "action": "request_token"
+        });
+        
+        match api::publish_mqtt(
+            "home/services/security_camera/command",
+            &payload.to_string()
+        ).await {
+            Ok(_) => set_status.set("Token requested".to_string()),
+            Err(e) => set_status.set(format!("Error: {}", e))
+        }
+    });
+
+    // Action to start streaming
+    let start_stream = create_action(move |_| async move {
+        // First request a token
+        request_token.dispatch(());
+        
+        // Then start the stream after a short delay to ensure token is received
+        set_status.set("Starting stream...".to_string());
+        
+        let payload = serde_json::json!({
+            "action": "start_stream"
+        });
+        
+        match api::publish_mqtt(
+            "home/services/security_camera/command",
+            &payload.to_string()
+        ).await {
+            Ok(_) => set_status.set("Stream requested".to_string()),
+            Err(e) => set_status.set(format!("Error: {}", e))
+        }
+    });
+
+    // Action to stop streaming
+    let stop_stream = create_action(move |_| async move {
+        set_status.set("Stopping stream...".to_string());
+        
+        let payload = serde_json::json!({
+            "action": "stop_stream"
+        });
+        
+        match api::publish_mqtt(
+            "home/services/security_camera/command",
+            &payload.to_string()
+        ).await {
+            Ok(_) => {
+                set_status.set("Stream stopped".to_string());
+                set_streaming.set(false);
+                set_stream_url.set(String::new());
+                set_stream_token.set(String::new());
+            },
             Err(e) => set_status.set(format!("Error: {}", e))
         }
     });
@@ -689,6 +755,33 @@ fn VideoViewer() -> impl IntoView {
                                             if let Some(image) = _json.get("image").and_then(|i| i.as_str()) {
                                                 set_image_data.set(image.to_string());
                                                 set_status.set("Image received".to_string());
+                                            }
+                                        }
+                                    },
+                                    // Handle stream info
+                                    "home/services/security_camera/stream" => {
+                                        if let Ok(_json) = serde_json::from_str::<serde_json::Value>(content) {
+                                            if let Some(is_streaming) = _json.get("streaming").and_then(|s| s.as_bool()) {
+                                                set_streaming.set(is_streaming);
+                                                
+                                                if is_streaming {
+                                                    if let Some(url) = _json.get("url").and_then(|u| u.as_str()) {
+                                                        set_stream_url.set(url.to_string());
+                                                        set_status.set("Stream active".to_string());
+                                                    }
+                                                } else {
+                                                    set_stream_url.set(String::new());
+                                                    set_status.set("Stream inactive".to_string());
+                                                }
+                                            }
+                                        }
+                                    },
+                                    // Handle stream token
+                                    "home/services/security_camera/token" => {
+                                        if let Ok(_json) = serde_json::from_str::<serde_json::Value>(content) {
+                                            if let Some(token) = _json.get("token").and_then(|t| t.as_str()) {
+                                                set_stream_token.set(token.to_string());
+                                                set_status.set("Token received".to_string());
                                             }
                                         }
                                     },
@@ -725,27 +818,88 @@ fn VideoViewer() -> impl IntoView {
         }
     });
 
+    // Request stream status on component mount
+    spawn_local(async move {
+        let payload = serde_json::json!({
+            "action": "get_stream_status"
+        });
+        
+        match api::publish_mqtt(
+            "home/services/security_camera/command",
+            &payload.to_string()
+        ).await {
+            Ok(_) => {},
+            Err(e) => set_status.set(format!("Error getting stream status: {}", e))
+        }
+    });
+
+    // Function to get the full stream URL with token
+    let get_stream_url = move || {
+        let base_url = stream_url.get();
+        let token = stream_token.get();
+        
+        if base_url.is_empty() || token.is_empty() {
+            return String::new();
+        }
+        
+        // Replace TOKEN placeholder with actual token
+        base_url.replace("TOKEN", &token)
+    };
+
     view! {
         <div class="bg-white rounded-lg shadow p-4">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-xl font-semibold">"Security Camera Feed"</h2>
-                <button
-                    class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 font-medium"
-                    on:click=move |_| request_snapshot.dispatch(())
-                >
-                    "Take Snapshot"
-                </button>
+                <div class="flex space-x-2">
+                    {move || {
+                        if streaming.get() {
+                            view! {
+                                <button
+                                    class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 font-medium"
+                                    on:click=move |_| stop_stream.dispatch(())
+                                >
+                                    "Stop Stream"
+                                </button>
+                            }
+                        } else {
+                            view! {
+                                <button
+                                    class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 font-medium"
+                                    on:click=move |_| start_stream.dispatch(())
+                                >
+                                    "Start Stream"
+                                </button>
+                            }
+                        }
+                    }}
+                    <button
+                        class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 font-medium"
+                        on:click=move |_| request_snapshot.dispatch(())
+                    >
+                        "Take Snapshot"
+                    </button>
+                </div>
             </div>
             <div class="space-y-4">
                 <div class="relative rounded overflow-hidden" style="min-height: 400px;">
                     {move || {
-                        if image_data.get().is_empty() {
+                        if streaming.get() && !stream_url.get().is_empty() && !stream_token.get().is_empty() {
+                            // Show live stream with token
                             view! {
-                                <div class="absolute inset-0 flex items-center justify-center bg-gray-100">
-                                    <span class="text-gray-500 text-lg">{move || status.get()}</span>
+                                <div class="absolute inset-0 bg-black">
+                                    <img 
+                                        src={get_stream_url()} 
+                                        class="w-full h-full object-contain"
+                                        alt="Live Stream"
+                                    />
+                                    <div class="absolute top-2 right-2 bg-black bg-opacity-50 rounded px-2 py-1 flex items-center">
+                                        <div class="w-3 h-3 rounded-full bg-red-600 mr-1 animate-pulse"></div>
+                                        <span class="text-white font-bold text-sm">LIVE</span>
+                                    </div>
                                 </div>
                             }
-                        } else {
+                        } else if !image_data.get().is_empty() {
+                            // Show snapshot
                             view! {
                                 <div class="absolute inset-0 bg-black">
                                     <img 
@@ -753,6 +907,13 @@ fn VideoViewer() -> impl IntoView {
                                         class="w-full h-full object-contain"
                                         alt="Security Camera Feed"
                                     />
+                                </div>
+                            }
+                        } else {
+                            // Show placeholder
+                            view! {
+                                <div class="absolute inset-0 flex items-center justify-center bg-gray-100">
+                                    <span class="text-gray-500 text-lg">{move || status.get()}</span>
                                 </div>
                             }
                         }

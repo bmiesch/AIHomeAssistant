@@ -267,6 +267,35 @@ impl ServiceManager {
             }
         }
 
+        // Copy over the https certificate if applicable
+        if ROOT_DIR.join("services").join(&service.name).join("certs").exists() {
+            let local_certs_dir = ROOT_DIR.join("services").join(&service.name).join("certs");
+            let remote_certs_dir = format!("/etc/nginx/certs");
+            service.device.execute_command(&format!("sudo rm -rf {}", remote_certs_dir))?;
+            service.device.execute_command(&format!("sudo mkdir -p {}", remote_certs_dir))?;
+            service.device.execute_command(&format!("sudo chown {} {}", service.device.config.username, remote_certs_dir))?;
+
+            let status = Command::new("sshpass")
+                .args([
+                    "-p", &service.device.config.password,
+                    "scp",
+                    "-r",
+                    &format!("{}/.", local_certs_dir.to_str().unwrap()),
+                    &format!("{}@{}:{}",
+                        service.device.config.username,
+                        service.device.config.ip_address,
+                        remote_certs_dir
+                    )
+                ])
+                .status()?;
+
+            if !status.success() {
+                return Err(ServiceManagerError::DeploymentError(
+                    "Failed to copy https certificate".to_string()
+                ));
+            }
+        }
+
         // First disable and unmask the service if it exists
         info!("Cleaning up existing service state");
         service.device.execute_command(&format!(

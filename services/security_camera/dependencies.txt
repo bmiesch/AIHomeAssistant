@@ -2,6 +2,8 @@
 libssl-dev
 build-essential
 unzip
+openssl
+
 # OpenCV dependencies
 libjpeg-dev
 libpng-dev
@@ -17,3 +19,12 @@ libtbb-dev
 libatlas-base-dev
 gfortran
 python3-dev
+
+# GStreamer dependencies
+libgstreamer1.0-dev
+libgstreamer-plugins-base1.0-dev
+libgstreamer-plugins-good1.0-dev
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+gstreamer1.0-plugins-ugly
+gstreamer1.0-tools
