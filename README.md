@@ -10,7 +10,7 @@ A distributed MQTT-based IoT system controlled via a locally-processed voice ass
 - Intent classification with Picovoice Rhino -> Command
 - Commands routed to appropriate services
 
-### Service Manager
+### Service Manager / Orchestrator
 - Cross-compile services for different architectures with Docker
 - Deploy services to remote devices and manage them with systemd
 - Health monitoring and status reporting
@@ -19,6 +19,7 @@ A distributed MQTT-based IoT system controlled via a locally-processed voice ass
 ### Core Services
 - **Core Service**: Handles audio pipeline, wake word detection, and intent classification
 - **LED Manager**: BLE-based LED control service
+- **Security Camera**: ML-based security camera with vehicle, person, and animal detection - Streams video to web UI
 - more to come...
 
 ## Technical Stack
@@ -27,3 +28,4 @@ A distributed MQTT-based IoT system controlled via a locally-processed voice ass
 - MQTT for service communication
 - SimpleBLE for device interactions
 - Picovoice models for voice processing
+- OpenCV and YOLO for image processing
