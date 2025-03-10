@@ -1,0 +1,35 @@
+[Unit]
+Description=Security Camera Service
+After=network-online.target NetworkManager-wait-online.service
+Requires=network-online.target NetworkManager-wait-online.service
+
+[Service]
+Type=simple
+ExecStart=/opt/services/security_camera
+Restart=always
+User={username}
+Group=video
+
+Environment=HOME=/home/{username}
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=LANG=en_GB.UTF-8
+Environment=LC_ALL=en_US.UTF-8
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=LD_LIBRARY_PATH=/usr/local/lib/security_camera
+
+Environment=MQTT_BROKER={mqtt_broker}
+Environment=MQTT_USERNAME={mqtt_username}
+Environment=MQTT_PASSWORD={mqtt_password}
+Environment=MQTT_CA_DIR={mqtt_ca_dir}
+Environment=CAMERA_ID=0
+Environment=NIGHT_MODE_THRESHOLD=50
+Environment=FRAME_WIDTH=640
+Environment=FRAME_HEIGHT=480
+Environment=FPS_TARGET=15
+Environment=HOST_IP={host_ip}
+Environment=HTTPS_ENABLED=true
+Environment=HTTPS_CERT_PATH=/etc/nginx/certs/server.crt
+Environment=HTTPS_KEY_PATH=/etc/nginx/certs/server.key
+
+[Install]
+WantedBy=multi-user.target

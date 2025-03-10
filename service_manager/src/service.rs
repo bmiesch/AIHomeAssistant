@@ -59,6 +59,7 @@ impl ServiceManager {
         let mqtt_password = env::var("MQTT_PASSWORD").expect("MQTT_PASSWORD not set");
         let mqtt_ca_dir = env::var("SERVICES_CA_DIR").expect("SERVICES_CA_DIR not set");
         let picovoice_access_key = env::var("PICOVOICE_ACCESS_KEY").expect("PICOVOICE_ACCESS_KEY not set");
+        let host_ip = env::var("HOST_IP").expect("HOST_IP not set");
 
         let template = Self::read_service_template(&service.name)?;
         Ok(template.replace("{mqtt_broker}", &mqtt_broker)
@@ -66,7 +67,8 @@ impl ServiceManager {
             .replace("{mqtt_password}", &mqtt_password)
             .replace("{mqtt_ca_dir}", &mqtt_ca_dir)
             .replace("{picovoice_access_key}", &picovoice_access_key)
-            .replace("{username}", &service.device.config.username))
+            .replace("{username}", &service.device.config.username)
+            .replace("{host_ip}", &host_ip))
     }
 
     fn get_service_mut(&mut self, service_name: &str) -> Result<&mut Service, ServiceManagerError> {
